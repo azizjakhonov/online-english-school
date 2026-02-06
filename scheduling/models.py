@@ -34,8 +34,39 @@ class AvailabilityRule(models.Model):
         unique_together = ("teacher", "weekday", "start_time", "end_time")
 
     def clean(self):
+        """
+        Validation rules:
+        1) end_time must be after start_time
+        2) Active rules must NOT overlap with other active rules
+           for the same teacher + weekday.
+        """
+        # 1) Basic time range validation
         if self.end_time <= self.start_time:
             raise ValidationError("end_time must be after start_time")
+
+        # 2) Prevent overlap (only among ACTIVE rules)
+        if self.is_active:
+            qs = AvailabilityRule.objects.filter(
+                teacher=self.teacher,
+                weekday=self.weekday,
+                is_active=True,
+            )
+
+            # Exclude self when updating
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+
+            # Overlap condition:
+            # new_start < existing_end AND new_end > existing_start
+            qs = qs.filter(
+                start_time__lt=self.end_time,
+                end_time__gt=self.start_time,
+            )
+
+            if qs.exists():
+                raise ValidationError(
+                    "This availability rule overlaps with an existing active rule."
+                )
 
     def __str__(self):
         return (
