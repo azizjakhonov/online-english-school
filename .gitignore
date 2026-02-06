@@ -19,3 +19,8 @@ media/
 
 # Environment secrets
 .env
+seed.json
+*.log
+__pycache__/
+*.pyc
+.env
