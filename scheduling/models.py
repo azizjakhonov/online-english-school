@@ -1,8 +1,10 @@
 from django.db import models
 from django.core.exceptions import ValidationError
-from accounts.models import TeacherProfile
 from django.utils import timezone
-from accounts.models import StudentProfile
+from django.conf import settings
+
+from accounts.models import TeacherProfile, StudentProfile
+
 
 class AvailabilityRule(models.Model):
     class Weekdays(models.IntegerChoices):
@@ -36,7 +38,11 @@ class AvailabilityRule(models.Model):
             raise ValidationError("end_time must be after start_time")
 
     def __str__(self):
-        return f"{self.teacher.user.username} {self.get_weekday_display()} {self.start_time}-{self.end_time}"
+        return (
+            f"{self.teacher.user.username} "
+            f"{self.get_weekday_display()} {self.start_time}-{self.end_time}"
+        )
+
 
 class LessonSlot(models.Model):
     teacher = models.ForeignKey(
@@ -49,7 +55,6 @@ class LessonSlot(models.Model):
     end_datetime = models.DateTimeField()
 
     is_booked = models.BooleanField(default=False)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -65,7 +70,6 @@ class LessonSlot(models.Model):
 
     def __str__(self):
         return f"{self.teacher.user.username} {self.start_datetime}"
-
 
 
 class LessonBooking(models.Model):
@@ -87,6 +91,7 @@ class LessonBooking(models.Model):
         ordering = ["-created_at"]
 
     def clean(self):
+        # Extra guard (DB also protects via OneToOne on slot)
         if self.slot.is_booked:
             raise ValidationError("This slot is already booked.")
 
@@ -99,5 +104,22 @@ class LessonBooking(models.Model):
             self.slot.is_booked = True
             self.slot.save(update_fields=["is_booked"])
 
+        # Auto-create Lesson once per booking
+        if creating:
+            from lessons.models import Lesson  # local import avoids circular imports
+
+            Lesson.objects.get_or_create(
+                booking=self,
+                defaults={
+                    "teacher": self.slot.teacher,
+                    "student": self.student,
+                    "start_datetime": self.slot.start_datetime,
+                    "end_datetime": self.slot.end_datetime,
+                },
+            )
+
     def __str__(self):
-        return f"Booking<{self.student.user.username} -> {self.slot.teacher.user.username} @ {self.slot.start_datetime}>"
+        return (
+            f"Booking<{self.student.user.username} -> "
+            f"{self.slot.teacher.user.username} @ {self.slot.start_datetime}>"
+        )
