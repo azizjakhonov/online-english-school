@@ -30,5 +30,6 @@ urlpatterns = [
     path("api/", include("scheduling.urls")),
 
     path("api/", include("lessons.urls")),
+    path("api/", include("homework.urls")),
 
 ]
