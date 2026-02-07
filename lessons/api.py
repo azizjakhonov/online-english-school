@@ -209,3 +209,67 @@ class LessonDetailView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+# ============================
+# Teacher: lesson status (Step 8)
+# ============================
+
+class UpdateLessonStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(
+        choices=[
+            Lesson.Status.COMPLETED,
+            Lesson.Status.CANCELLED,
+        ]
+    )
+
+
+class LessonStatusView(APIView):
+    """
+    PATCH /api/lessons/<lesson_id>/status/
+
+    Teacher-only:
+    - can set COMPLETED or CANCELLED
+    - must own the lesson
+    - COMPLETED only allowed after lesson end time
+    - once COMPLETED/CANCELLED, status is locked
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, lesson_id: int):
+        if request.user.role != User.Roles.TEACHER:
+            raise ValidationError({"detail": "Only teachers can update lesson status."})
+
+        teacher = get_object_or_404(
+            TeacherProfile.objects.select_related("user"),
+            user=request.user,
+        )
+
+        lesson = get_object_or_404(
+            Lesson.objects.select_related("teacher__user", "student__user"),
+            id=lesson_id,
+            teacher=teacher,  # ownership guard
+        )
+
+        # Lock finished lessons (prevents status flip-flopping)
+        if lesson.status in (Lesson.Status.COMPLETED, Lesson.Status.CANCELLED):
+            raise ValidationError({"detail": f"Lesson is already {lesson.status} and cannot be changed."})
+
+        serializer = UpdateLessonStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_status = serializer.validated_data["status"]
+
+        # Business rule: cannot mark completed before lesson ends
+        if new_status == Lesson.Status.COMPLETED and lesson.end_datetime > timezone.now():
+            raise ValidationError({"detail": "Cannot mark lesson COMPLETED before it ends."})
+
+        lesson.status = new_status
+        lesson.save(update_fields=["status"])
+
+        return Response(
+            {
+                "detail": "Lesson status updated.",
+                "lesson_id": lesson.id,
+                "status": lesson.status,
+            },
+            status=status.HTTP_200_OK,
+        )
