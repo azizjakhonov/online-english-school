@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.models import TeacherProfile
 from django.db import models
+from rest_framework.exceptions import ValidationError
 
 User = get_user_model()
 
