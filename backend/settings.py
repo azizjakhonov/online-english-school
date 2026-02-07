@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     'homework',
     'progress',
     'rest_framework',
+    'drf_spectacular',
+    'drf_spectacular_sidecar',
 
     'django.contrib.admin',
     'django.contrib.auth',
@@ -133,7 +135,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
-MEDIA_URL = "media/"
+MEDIA_URL = "/media/"
+
 MEDIA_ROOT = BASE_DIR / "media"
 
 AUTH_USER_MODEL = 'accounts.User'
@@ -145,6 +148,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+
 }
 from datetime import timedelta
 
@@ -156,8 +161,20 @@ SIMPLE_JWT = {
 }
 
 
-from django.conf import settings
-from django.conf.urls.static import static
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Online English School API",
+    "DESCRIPTION": "Backend API for 1v1 lessons (teachers/students), scheduling, homework, and progress.",
+    "VERSION": "1.0.0",
 
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # This creates the JWT "Authorize" in Swagger UI ✅
+    "COMPONENTS": {
+        "securitySchemes": {
+            "BearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT",
+            }
+        }
+    },
+    "SECURITY": [{"BearerAuth": []}],
+}
