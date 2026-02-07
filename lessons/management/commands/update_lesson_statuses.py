@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -5,7 +7,10 @@ from lessons.models import Lesson
 
 
 class Command(BaseCommand):
-    help = "Auto-update Lesson statuses based on time (e.g., mark past scheduled lessons as COMPLETED)."
+    help = (
+        "Auto-update Lesson statuses after they end. "
+        "SCHEDULED lessons become COMPLETED if there's evidence they happened; otherwise MISSED."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -20,24 +25,47 @@ class Command(BaseCommand):
             help="Print what would change without saving",
         )
 
+    def _has_progress(self, lesson: Lesson) -> bool:
+        # progress is OneToOne: lesson.progress
+        return hasattr(lesson, "progress") and lesson.progress is not None
+
+    def _has_homework_submission(self, lesson: Lesson) -> bool:
+        # homework is OneToOne: lesson.homework, submission is OneToOne: homework.submission
+        if not hasattr(lesson, "homework") or lesson.homework is None:
+            return False
+        return hasattr(lesson.homework, "submission") and lesson.homework.submission is not None
+
+    def _has_teacher_notes(self, lesson: Lesson) -> bool:
+        return bool((lesson.teacher_notes or "").strip())
+
     def handle(self, *args, **options):
         grace_minutes = options["grace_minutes"]
         dry_run = options["dry_run"]
 
         now = timezone.now()
-        cutoff = now - timezone.timedelta(minutes=grace_minutes)
+        cutoff = now - timedelta(minutes=grace_minutes)
 
         # Only touch lessons still marked SCHEDULED and already ended (plus grace period)
-        qs = Lesson.objects.filter(
-            status=Lesson.Status.SCHEDULED,
-            end_datetime__lte=cutoff,
+        qs = (
+            Lesson.objects.filter(
+                status=Lesson.Status.SCHEDULED,
+                end_datetime__lte=cutoff,
+            )
+            # OneToOne relations; select_related prevents N+1 queries
+            .select_related("teacher__user", "student__user", "progress", "homework", "homework__submission")
         )
 
         updated_completed = 0
-        updated_missed = 0  # reserved for later attendance logic
+        updated_missed = 0
 
-        for lesson in qs.select_related("teacher__user", "student__user"):
-            new_status = Lesson.Status.COMPLETED
+        for lesson in qs:
+            evidence_completed = (
+                self._has_progress(lesson)
+                or self._has_teacher_notes(lesson)
+                or self._has_homework_submission(lesson)
+            )
+
+            new_status = Lesson.Status.COMPLETED if evidence_completed else Lesson.Status.MISSED
 
             if dry_run:
                 self.stdout.write(
@@ -48,12 +76,14 @@ class Command(BaseCommand):
 
             lesson.status = new_status
             lesson.save(update_fields=["status"])
-            updated_completed += 1
 
-        total_considered = updated_completed + updated_missed
+            if new_status == Lesson.Status.COMPLETED:
+                updated_completed += 1
+            else:
+                updated_missed += 1
 
         msg = (
             f"Done. Updated COMPLETED={updated_completed}, MISSED={updated_missed}. "
-            f"Considered {total_considered} lessons (cutoff={cutoff.isoformat()})."
+            f"Cutoff={cutoff.isoformat()}."
         )
         self.stdout.write(self.style.SUCCESS(msg))
