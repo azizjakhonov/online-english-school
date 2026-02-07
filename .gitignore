@@ -24,3 +24,8 @@ seed.json
 __pycache__/
 *.pyc
 .env
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
