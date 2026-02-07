@@ -359,3 +359,92 @@ class RegenerateMySlotsView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+# ============================
+# Teacher Slot Management (Step 7)
+# ============================
+
+class TeacherSlotSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LessonSlot
+        fields = ["id", "start_datetime", "end_datetime", "is_booked", "created_at"]
+
+
+class TeacherSlotsView(APIView):
+    """
+    GET /api/teacher/slots/
+
+    Teacher-only endpoint listing the authenticated teacher's slots.
+
+    Filters (optional):
+    - ?upcoming=true -> start_datetime >= now
+    - ?past=true     -> end_datetime < now
+    - ?booked=true/false -> filter by is_booked
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != User.Roles.TEACHER:
+            raise ValidationError({"detail": "Only teachers can view their slots."})
+
+        teacher = get_object_or_404(
+            TeacherProfile.objects.select_related("user"),
+            user=request.user,
+        )
+
+        qs = LessonSlot.objects.filter(teacher=teacher).order_by("start_datetime")
+
+        now = timezone.now()
+        upcoming = request.query_params.get("upcoming")
+        past = request.query_params.get("past")
+        booked = request.query_params.get("booked")
+
+        if upcoming and upcoming.lower() in ("1", "true", "yes"):
+            qs = qs.filter(start_datetime__gte=now)
+
+        if past and past.lower() in ("1", "true", "yes"):
+            qs = qs.filter(end_datetime__lt=now)
+
+        if booked is not None:
+            b = booked.lower()
+            if b in ("1", "true", "yes"):
+                qs = qs.filter(is_booked=True)
+            elif b in ("0", "false", "no"):
+                qs = qs.filter(is_booked=False)
+            else:
+                raise ValidationError({"booked": "Invalid value. Use true/false."})
+
+        return Response(TeacherSlotSerializer(qs, many=True).data)
+
+
+class TeacherSlotDetailView(APIView):
+    """
+    DELETE /api/teacher/slots/<slot_id>/
+
+    Teacher-only:
+    - can delete ONLY their own slot
+    - cannot delete a booked slot (safety)
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, slot_id: int):
+        if request.user.role != User.Roles.TEACHER:
+            raise ValidationError({"detail": "Only teachers can manage slots."})
+
+        teacher = get_object_or_404(
+            TeacherProfile.objects.select_related("user"),
+            user=request.user,
+        )
+
+        slot = get_object_or_404(
+            LessonSlot.objects.select_related("teacher__user"),
+            id=slot_id,
+            teacher=teacher,  # ownership guard
+        )
+
+        if slot.is_booked:
+            raise ValidationError({"detail": "Cannot delete a booked slot."})
+
+        slot.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
