@@ -1,22 +1,27 @@
 from django.urls import path
-
-from .api import (
-    AssignHomeworkToLessonView,
-    MyHomeworkView,
+from .views import (
+    HomeworkLibraryListView, 
+    AssignHomeworkView, 
+    StudentHomeworkDetailView, 
     SubmitHomeworkView,
-    ReviewHomeworkSubmissionView,
+    TeacherAssignmentsListView,
+    StudentAssignmentsListView,
+    AdminHomeworkCreateView,
+    AdminHomeworkDeleteView,
+    AdminQuestionCreateView
+
 )
 
 urlpatterns = [
-    # Teacher assigns homework to a lesson
-    path("lessons/<int:lesson_id>/homework/", AssignHomeworkToLessonView.as_view(), name="assign-homework"),
-
-    # Student views all their homework
-    path("my/homework/", MyHomeworkView.as_view(), name="my-homework"),
-
-    # Student submits homework
-    path("homework/<int:homework_id>/submit/", SubmitHomeworkView.as_view(), name="submit-homework"),
-
-    # Teacher reviews submission
-    path("homework/<int:homework_id>/review/", ReviewHomeworkSubmissionView.as_view(), name="review-homework"),
+    # Teacher URLs
+    path('library/', HomeworkLibraryListView.as_view(), name='homework-library'),
+    path('assign/<int:lesson_id>/', AssignHomeworkView.as_view(), name='assign-homework'),
+    path('teacher-assignments/', TeacherAssignmentsListView.as_view(), name='teacher-assignments'),
+    # Student URLs
+    path('assignment/<int:assignment_id>/', StudentHomeworkDetailView.as_view(), name='student-homework-detail'),
+    path('create/', AdminHomeworkCreateView.as_view(), name='admin-homework-create'),
+    path('<int:homework_id>/add_question/', AdminQuestionCreateView.as_view(), name='admin-question-add'),
+    path('<int:pk>/delete/', AdminHomeworkDeleteView.as_view(), name='admin-homework-delete'),
+    path('my-assignments/', StudentAssignmentsListView.as_view(), name='my-assignments'),
+    path('assignment/<int:assignment_id>/submit/', SubmitHomeworkView.as_view(), name='submit-homework'),
 ]

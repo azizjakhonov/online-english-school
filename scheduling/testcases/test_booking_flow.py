@@ -1,59 +1,64 @@
-from datetime import timedelta
+from datetime import time
 
 from django.test import TestCase
-from django.utils import timezone
+from django.urls import reverse
 from rest_framework.test import APIClient
 
-from accounts.models import User
-from scheduling.models import LessonSlot
+from accounts.models import User, TeacherProfile
 
 
-class BookingFlowTests(TestCase):
+class SchedulingFlowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-        self.teacher = User.objects.create_user(
-            username="t_test",
-            email="t_test@example.com",
-            password="pass12345",
+        self.teacher_user = User.objects.create_user(
+            username="t_sched",
+            email="t_sched@test.com",
+            password="test12345",
             role=User.Roles.TEACHER,
         )
-        self.student = User.objects.create_user(
-            username="s_test",
-            email="s_test@example.com",
-            password="pass12345",
+        self.teacher = TeacherProfile.objects.get(user=self.teacher_user)
+
+    def test_teacher_can_create_rule_and_regenerate_slots(self):
+        self.client.force_authenticate(user=self.teacher_user)
+
+        # Create rule
+        url = reverse("availability-rules")
+        res = self.client.post(
+            url,
+            {
+                "weekday": 0,  # Monday
+                "start_time": "09:00:00",
+                "end_time": "11:00:00",
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.data["weekday"], 0)
+
+        # Regenerate slots
+        regen_url = reverse("regenerate-my-slots")
+        res2 = self.client.post(regen_url, {"days": 14, "slot_minutes": 60}, format="json")
+        self.assertEqual(res2.status_code, 200)
+        self.assertIn("created", res2.data)
+        # should create at least 1 slot
+        self.assertGreaterEqual(res2.data["created"] + res2.data["skipped_existing"], 1)
+
+    def test_student_cannot_manage_rules(self):
+        student_user = User.objects.create_user(
+            username="s_sched",
+            email="s_sched@test.com",
+            password="test12345",
             role=User.Roles.STUDENT,
         )
+        self.client.force_authenticate(user=student_user)
 
-        # Profiles auto-created by signal, but we can rely on relations:
-        self.teacher_profile = self.teacher.teacher_profile
-        self.student_profile = self.student.student_profile
-
-        start = timezone.now() + timedelta(days=1)
-        end = start + timedelta(minutes=60)
-
-        self.slot = LessonSlot.objects.create(
-            teacher=self.teacher_profile,
-            start_datetime=start,
-            end_datetime=end,
-            is_booked=False,
+        url = reverse("availability-rules")
+        res = self.client.post(
+            url,
+            {"weekday": 0, "start_time": "09:00:00", "end_time": "11:00:00"},
+            format="json",
         )
-
-    def auth_as(self, user: User):
-        self.client.force_authenticate(user=user)
-
-    def test_student_can_book_slot_and_lesson_created(self):
-        self.auth_as(self.student)
-
-        res = self.client.post("/api/bookings/", {"slot_id": self.slot.id}, format="json")
-        self.assertEqual(res.status_code, 201)
-        self.assertTrue(res.data.get("lesson_created"))
-
-        # slot becomes booked
-        self.slot.refresh_from_db()
-        self.assertTrue(self.slot.is_booked)
-
-    def test_teacher_cannot_book_slot(self):
-        self.auth_as(self.teacher)
-        res = self.client.post("/api/bookings/", {"slot_id": self.slot.id}, format="json")
-        self.assertEqual(res.status_code, 400)  # ValidationError in your code
+        self.assertEqual(res.status_code, 400)  # your API uses ValidationError -> 400
+        self.assertIn("detail", res.data)

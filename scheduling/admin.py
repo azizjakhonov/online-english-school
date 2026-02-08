@@ -1,30 +1,13 @@
 from django.contrib import admin
-from .models import AvailabilityRule, LessonSlot, LessonBooking
+from .models import Availability, Lesson
 
+@admin.register(Availability)
+class AvailabilityAdmin(admin.ModelAdmin):
+    list_display = ('teacher', 'day_of_week', 'start_time', 'end_time')
+    list_filter = ('day_of_week', 'teacher')
 
-@admin.register(AvailabilityRule)
-class AvailabilityRuleAdmin(admin.ModelAdmin):
-    list_display = ("teacher", "weekday", "start_time", "end_time", "is_active", "created_at")
-    list_filter = ("weekday", "is_active")
-    search_fields = ("teacher__user__username", "teacher__user__email")
-    ordering = ("teacher", "weekday", "start_time")
-
-
-@admin.register(LessonSlot)
-class LessonSlotAdmin(admin.ModelAdmin):
-    list_display = ("teacher", "start_datetime", "end_datetime", "is_booked", "created_at")
-    list_filter = ("is_booked",)
-    search_fields = ("teacher__user__username", "teacher__user__email")
-    ordering = ("start_datetime",)
-
-
-@admin.register(LessonBooking)
-class LessonBookingAdmin(admin.ModelAdmin):
-    list_display = ("slot", "student", "created_at")
-    search_fields = (
-        "student__user__username",
-        "student__user__email",
-        "slot__teacher__user__username",
-        "slot__teacher__user__email",
-    )
-    ordering = ("-created_at",)
+@admin.register(Lesson)
+class LessonAdmin(admin.ModelAdmin):
+    list_display = ('id', 'teacher', 'student', 'start_time', 'status')
+    list_filter = ('status', 'start_time')
+    search_fields = ('teacher__full_name', 'student__full_name')

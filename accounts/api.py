@@ -1,310 +1,209 @@
-from django.contrib.auth import get_user_model
-from django.db import IntegrityError
-from django.shortcuts import get_object_or_404
-from rest_framework import serializers, status
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.response import Response
+import random
+from rest_framework import generics, serializers, permissions, status
 from rest_framework.views import APIView
-from accounts.models import TeacherProfile
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
 from django.db import models
-from rest_framework.exceptions import ValidationError
-from accounts.models import TeacherProfile, StudentProfile, User
+
+# Local imports
+from .models import TeacherProfile, StudentProfile, PhoneOTP
+
 User = get_user_model()
 
+# ==========================================
+# 1. SERIALIZERS
+# ==========================================
 
-class RegisterSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
-    email = serializers.EmailField()
-    password = serializers.CharField(min_length=8, write_only=True)
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'phone_number', 'full_name', 'role', 'date_joined']
 
-    full_name = serializers.CharField(required=False, allow_blank=True)
-    role = serializers.ChoiceField(choices=User.Roles.choices)
+class TeacherProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = TeacherProfile
+        fields = ['id', 'user', 'bio', 'headline', 'youtube_intro_url', 
+                  'hourly_rate', 'rating', 'lessons_taught', 
+                  'is_accepting_students']
 
+class StudentProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
 
-class RegisterView(APIView):
-    """
-    POST /api/auth/register/
-    Body:
-    {
-      "username": "student2",
-      "email": "student2@example.com",
-      "password": "test12345",
-      "full_name": "Student Two",
-      "role": "STUDENT"
-    }
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        s = RegisterSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        data = s.validated_data
-
-        try:
-            user = User(
-                username=data["username"],
-                email=data["email"],
-                role=data["role"],
-                full_name=data.get("full_name", ""),
-                is_active=True,
-            )
-            user.set_password(data["password"])
-            user.save()
-        except IntegrityError:
-            # likely username or email uniqueness conflict
-            return Response(
-                {"detail": "Username or email already exists."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return Response(
-            {
-                "detail": "User registered.",
-                "id": user.id,
-                "username": user.username,
-                "email": user.email,
-                "role": user.role,
-            },
-            status=status.HTTP_201_CREATED,
-        )
-
+    class Meta:
+        model = StudentProfile
+        fields = ['id', 'user', 'level', 'lesson_credits', 'goals']
 
 class MeSerializer(serializers.ModelSerializer):
-    teacher_profile = serializers.SerializerMethodField()
-    student_profile = serializers.SerializerMethodField()
+    """
+    Serializer for the current user (combines User + Profile data)
+    """
+    teacher_profile = TeacherProfileSerializer(read_only=True)
+    student_profile = StudentProfileSerializer(read_only=True)
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "role", "full_name", "teacher_profile", "student_profile", "created_at"]
-
-    def get_teacher_profile(self, obj):
-        if hasattr(obj, "teacher_profile"):
-            p = obj.teacher_profile
-            return {
-                "id": p.id,
-                "bio": p.bio,
-                "timezone": p.timezone,
-                "is_accepting_students": p.is_accepting_students,
-                "created_at": p.created_at,
-            }
-        return None
-
-    def get_student_profile(self, obj):
-        if hasattr(obj, "student_profile"):
-            p = obj.student_profile
-            return {
-                "id": p.id,
-                "level": p.level,
-                "timezone": p.timezone,
-                "goals": p.goals,
-                "created_at": p.created_at,
-            }
-        return None
+        # FIXED: Changed 'created_at' to 'date_joined' to match Django defaults
+        fields = ["id", "phone_number", "email", "role", "full_name", 
+                  "teacher_profile", "student_profile", "date_joined"]
 
 
-class MeView(APIView):
-    """
-    GET /api/me/
-    Returns info about the currently authenticated user.
-    """
-    permission_classes = [IsAuthenticated]
+# ==========================================
+# 2. AUTHENTICATION VIEWS (OTP)
+# ==========================================
 
-    def get(self, request):
-        return Response(MeSerializer(request.user).data)
-class TeacherListSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(source="user.username", read_only=True)
-    full_name = serializers.CharField(source="user.full_name", read_only=True)
-
-    class Meta:
-        model = TeacherProfile
-        fields = [
-            "id",
-            "username",
-            "full_name",
-            "bio",
-            "timezone",
-            "is_accepting_students",
-            "created_at",
-        ]
-
-
-class TeachersListView(APIView):
-    """
-    GET /api/teachers/
-    Student-only. Returns list of teachers.
-
-    Optional filters:
-    - ?accepting=true/false
-    - ?q=search (matches username/full_name)
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        if request.user.role != User.Roles.STUDENT:
-            raise ValidationError({"detail": "Only students can browse teachers."})
-
-        qs = TeacherProfile.objects.select_related("user").order_by("-created_at")
-
-        accepting = request.query_params.get("accepting")
-        if accepting and accepting.lower() in ("1", "true", "yes"):
-            qs = qs.filter(is_accepting_students=True)
-        elif accepting and accepting.lower() in ("0", "false", "no"):
-            qs = qs.filter(is_accepting_students=False)
-
-        q = request.query_params.get("q")
-        if q:
-            qs = qs.filter(
-                models.Q(user__username__icontains=q) |
-                models.Q(user__full_name__icontains=q)
-            )
-
-        return Response(TeacherListSerializer(qs, many=True).data)
-UserModel = get_user_model()
-
-
-class RegisterStudentSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
-    email = serializers.EmailField()
-    password = serializers.CharField(min_length=6, write_only=True)
-    full_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
-
-    def validate_username(self, v):
-        if UserModel.objects.filter(username=v).exists():
-            raise serializers.ValidationError("Username already taken.")
-        return v
-
-    def validate_email(self, v):
-        if UserModel.objects.filter(email=v).exists():
-            raise serializers.ValidationError("Email already used.")
-        return v
-
-
-class RegisterTeacherSerializer(RegisterStudentSerializer):
-    pass
-
-
-class RegisterStudentView(APIView):
+class SendOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        s = RegisterStudentSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
+        phone = request.data.get('phone')
+        if not phone:
+            return Response({'error': 'Phone number is required'}, status=400)
 
-        user = UserModel(
-            username=s.validated_data["username"],
-            email=s.validated_data["email"],
-            full_name=s.validated_data.get("full_name", ""),
-            role=User.Roles.STUDENT,
-            is_active=True,
+        # Generate 5-digit code
+        otp = str(random.randint(10000, 99999))
+        
+        # Save to DB (Persistent & Safer than cache)
+        PhoneOTP.objects.update_or_create(
+            phone_number=phone,
+            defaults={'otp': otp}
         )
-        user.set_password(s.validated_data["password"])
-        user.save()  # signal creates StudentProfile
 
-        return Response({"detail": "Student registered."}, status=status.HTTP_201_CREATED)
+        print(f"\n🔥🔥🔥 [DEBUG] OTP for {phone}: {otp} 🔥🔥🔥\n")
+        return Response({'message': 'OTP sent successfully'})
 
 
-class RegisterTeacherView(APIView):
+class VerifyOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        s = RegisterTeacherSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
+        phone = request.data.get('phone')
+        code = request.data.get('code')
 
-        user = UserModel(
-            username=s.validated_data["username"],
-            email=s.validated_data["email"],
-            full_name=s.validated_data.get("full_name", ""),
-            role=User.Roles.TEACHER,
-            is_active=True,
-        )
-        user.set_password(s.validated_data["password"])
-        user.save()  # signal creates TeacherProfile
+        # 1. Verify OTP
+        try:
+            record = PhoneOTP.objects.get(phone_number=phone)
+            if record.otp != str(code):
+                return Response({'error': 'Invalid code'}, status=400)
+        except PhoneOTP.DoesNotExist:
+            return Response({'error': 'Invalid phone number'}, status=400)
 
-        return Response({"detail": "Teacher registered."}, status=status.HTTP_201_CREATED)
+        # 2. Get or Create User
+        user, created = User.objects.get_or_create(phone_number=phone)
+        if created:
+            user.set_unusable_password()
+            user.save()
+
+        # 3. Generate Tokens
+        refresh = RefreshToken.for_user(user)
+        
+        # 4. Check if setup is needed
+        is_new = created or user.role == 'NEW' or not user.full_name
+
+        # Clear OTP after success
+        record.delete()
+
+        return Response({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'role': user.role,
+            'is_new_user': is_new
+        })
 
 
-class MeSerializer(serializers.Serializer):
-    # base
-    username = serializers.CharField(read_only=True)
-    email = serializers.EmailField(required=False)
-    full_name = serializers.CharField(required=False, allow_blank=True)
-    role = serializers.CharField(read_only=True)
+class SelectRoleView(APIView):
+    permission_classes = [IsAuthenticated]
 
-    # teacher profile
-    bio = serializers.CharField(required=False, allow_blank=True)
-    timezone = serializers.CharField(required=False, allow_blank=True)
-    is_accepting_students = serializers.BooleanField(required=False)
+    def post(self, request):
+        role = request.data.get('role')
+        full_name = request.data.get('full_name')
 
-    # student profile
-    level = serializers.CharField(required=False)
-    goals = serializers.CharField(required=False, allow_blank=True)
+        if role not in ['student', 'teacher']:
+            return Response({'error': 'Invalid role'}, status=400)
 
-    def validate_email(self, v):
-        user = self.context["request"].user
-        if UserModel.objects.exclude(id=user.id).filter(email=v).exists():
-            raise serializers.ValidationError("Email already used.")
-        return v
+        user = request.user
+        user.full_name = full_name
+        
+        if role == 'student':
+            user.role = User.Roles.STUDENT
+            StudentProfile.objects.get_or_create(user=user)
+        elif role == 'teacher':
+            user.role = User.Roles.TEACHER
+            TeacherProfile.objects.get_or_create(user=user)
+        
+        user.save()
+        return Response({'message': 'Setup complete'})
 
+
+# ==========================================
+# 3. DATA VIEWS
+# ==========================================
 
 class MeView(APIView):
+    """
+    GET: Returns current user data.
+    PATCH: Updates user profile (bio, photo, etc).
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        u = request.user
-
-        data = {
-            "username": u.username,
-            "email": u.email,
-            "full_name": u.full_name,
-            "role": u.role,
-        }
-
-        if u.role == User.Roles.TEACHER and hasattr(u, "teacher_profile"):
-            tp = u.teacher_profile
-            data.update({
-                "bio": tp.bio,
-                "timezone": tp.timezone,
-                "is_accepting_students": tp.is_accepting_students,
-            })
-
-        if u.role == User.Roles.STUDENT and hasattr(u, "student_profile"):
-            sp = u.student_profile
-            data.update({
-                "level": sp.level,
-                "timezone": sp.timezone,
-                "goals": sp.goals,
-            })
-
-        return Response(data)
+        serializer = MeSerializer(request.user)
+        return Response(serializer.data)
 
     def patch(self, request):
-        s = MeSerializer(data=request.data, partial=True, context={"request": request})
-        s.is_valid(raise_exception=True)
+        user = request.user
+        data = request.data
+        
+        # 1. Update Basic Info
+        if "full_name" in data:
+            user.full_name = data["full_name"]
+        if "email" in data:
+            user.email = data["email"]
+        user.save()
 
-        u = request.user
-        vd = s.validated_data
+        # 2. Update Teacher Profile
+        if user.role == User.Roles.TEACHER:
+            profile, _ = TeacherProfile.objects.get_or_create(user=user)
+            if "bio" in data: profile.bio = data["bio"]
+            if "headline" in data: profile.headline = data["headline"]
+            if "hourly_rate" in data: profile.hourly_rate = data["hourly_rate"]
+            if "youtube_intro_url" in data: profile.youtube_intro_url = data["youtube_intro_url"]
+            profile.save()
 
-        # user fields
-        for field in ("email", "full_name"):
-            if field in vd:
-                setattr(u, field, vd[field])
-        u.save()
-
-        # teacher profile fields
-        if u.role == User.Roles.TEACHER:
-            tp = get_object_or_404(TeacherProfile, user=u)
-            for field in ("bio", "timezone", "is_accepting_students"):
-                if field in vd:
-                    setattr(tp, field, vd[field])
-            tp.save()
-
-        # student profile fields
-        if u.role == User.Roles.STUDENT:
-            sp = get_object_or_404(StudentProfile, user=u)
-            for field in ("level", "timezone", "goals"):
-                if field in vd:
-                    setattr(sp, field, vd[field])
-            sp.save()
+        # 3. Update Student Profile
+        if user.role == User.Roles.STUDENT:
+            profile, _ = StudentProfile.objects.get_or_create(user=user)
+            if "goals" in data: profile.goals = data["goals"]
+            if "level" in data: profile.level = data["level"]
+            profile.save()
 
         return Response({"detail": "Profile updated."})
+class TeacherDetailView(generics.RetrieveAPIView):
+    queryset = TeacherProfile.objects.all()
+    serializer_class = TeacherProfileSerializer
+    permission_classes = [permissions.AllowAny]
+    lookup_field = 'id'
+
+class TeachersListView(generics.ListAPIView):
+    """
+    Public list of teachers with filtering.
+    """
+    serializer_class = TeacherProfileSerializer
+    permission_classes = [AllowAny] # Changed to AllowAny so guests can see teachers
+
+    def get_queryset(self):
+        queryset = TeacherProfile.objects.all().order_by('-rating')
+        
+        # Search Filter
+        q = self.request.query_params.get('q')
+        if q:
+            queryset = queryset.filter(
+                models.Q(user__full_name__icontains=q) | 
+                models.Q(headline__icontains=q)
+            )
+            
+        return queryset

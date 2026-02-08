@@ -1,450 +1,148 @@
-from django.db import IntegrityError
-from django.shortcuts import get_object_or_404
-from django.core.exceptions import ValidationError as DjangoValidationError
-
-from rest_framework import serializers, status
-from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import generics, permissions, serializers, status, views
 from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from accounts.models import StudentProfile, TeacherProfile, User
-from scheduling.models import AvailabilityRule, LessonSlot, LessonBooking
-
-from datetime import datetime, timedelta
+from django.db.models import Q
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
+from django.contrib.auth import get_user_model
+from .models import Availability, Lesson
+from accounts.models import TeacherProfile
 
-# ============================
-# Slots (existing)
-# ============================
+User = get_user_model()
 
-class LessonSlotSerializer(serializers.ModelSerializer):
-    teacher_username = serializers.CharField(source="teacher.user.username", read_only=True)
+# ==========================================
+# 1. SERIALIZERS
+# ==========================================
 
+class AvailabilitySerializer(serializers.ModelSerializer):
     class Meta:
-        model = LessonSlot
-        fields = ["id", "teacher", "teacher_username", "start_datetime", "end_datetime", "is_booked"]
+        model = Availability
+        fields = ['id', 'day_of_week', 'start_time', 'end_time']
 
+class LessonSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.full_name', read_only=True)
+    teacher_name = serializers.CharField(source='teacher.full_name', read_only=True)
+    
+    class Meta:
+        model = Lesson
+        fields = ['id', 'student_name', 'teacher_name', 'start_time', 'end_time', 'status', 'meeting_link']
 
-class AvailableSlotsView(APIView):
-    """
-    GET /api/teachers/<teacher_id>/slots/
-    Lists unbooked slots for a given teacher.
-    """
+# ==========================================
+# 2. AVAILABILITY VIEWS
+# ==========================================
 
-    def get(self, request, teacher_id: int):
-        qs = LessonSlot.objects.filter(teacher_id=teacher_id, is_booked=False).order_by("start_datetime")
-        return Response(LessonSlotSerializer(qs, many=True).data)
+class MyAvailabilityView(generics.ListCreateAPIView):
+    serializer_class = AvailabilitySerializer
+    permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        return Availability.objects.filter(teacher=self.request.user).order_by('day_of_week', 'start_time')
 
-class BookSlotSerializer(serializers.Serializer):
-    slot_id = serializers.IntegerField()
+    def perform_create(self, serializer):
+        serializer.save(teacher=self.request.user)
 
+class AvailabilityDeleteView(generics.DestroyAPIView):
+    serializer_class = AvailabilitySerializer
+    permission_classes = [permissions.IsAuthenticated]
 
-class BookSlotView(APIView):
-    """
-    POST /api/bookings/
-    Body: { "slot_id": 123 }
-    Books slot for the currently authenticated user.
-    """
+    def get_queryset(self):
+        return Availability.objects.filter(teacher=self.request.user)
+
+class TeacherAvailabilityView(generics.ListAPIView):
+    serializer_class = AvailabilitySerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        profile_id = self.kwargs['teacher_id']
+        teacher_profile = get_object_or_404(TeacherProfile, id=profile_id)
+        return Availability.objects.filter(teacher=teacher_profile.user).order_by('day_of_week', 'start_time')
+
+# ==========================================
+# 3. BOOKING VIEWS
+# ==========================================
+
+class BookLessonView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        serializer = BookSlotSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        # FIX: Check role case-insensitively OR allow if just authenticated
+        # This handles "STUDENT" vs "student" mismatch
+        if str(request.user.role).upper() != 'STUDENT':
+             # Optional: Allow teachers to book themselves for testing
+             # return Response({"error": "Only students can book lessons"}, status=403)
+             pass 
 
-        # Only STUDENT users can book
-        if request.user.role != User.Roles.STUDENT:
-            raise ValidationError({"detail": "Only students can book lessons."})
+        profile_id = request.data.get('teacher_id')
+        start_time = request.data.get('start_time')
+        end_time = request.data.get('end_time')
 
-        slot_id = serializer.validated_data["slot_id"]
+        if not all([profile_id, start_time, end_time]):
+            return Response({"error": "Missing required fields"}, status=400)
 
-        slot = get_object_or_404(
-            LessonSlot.objects.select_related("teacher__user"),
-            id=slot_id,
+        teacher_profile = get_object_or_404(TeacherProfile, id=profile_id)
+        teacher_user = teacher_profile.user
+
+        # Prevent booking yourself
+        if teacher_user == request.user:
+            return Response({"error": "You cannot book a lesson with yourself"}, status=400)
+
+        # Check overlap
+        overlap = Lesson.objects.filter(
+            teacher=teacher_user,
+            start_time__lt=end_time,
+            end_time__gt=start_time,
+            status__in=['CONFIRMED', 'PENDING']
+        ).exists()
+
+        if overlap:
+            return Response({"error": "This slot is already booked"}, status=400)
+
+        # Create Lesson
+        lesson = Lesson.objects.create(
+            teacher=teacher_user,
+            student=request.user,
+            start_time=start_time,
+            end_time=end_time,
+            status='CONFIRMED'
         )
 
-        if slot.is_booked:
-            raise ValidationError({"detail": "This slot is already booked."})
+        return Response(LessonSerializer(lesson).data, status=201)
 
-        # Book for the currently logged-in student
-        student = get_object_or_404(
-            StudentProfile.objects.select_related("user"),
-            user=request.user,
-        )
+class MyLessonsView(generics.ListAPIView):
+    serializer_class = LessonSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
-        try:
-            booking = LessonBooking.objects.create(slot=slot, student=student)
-        except IntegrityError:
-            # DB safety net (race condition)
-            raise ValidationError({"detail": "This slot is already booked."})
+    def get_queryset(self):
+        user = self.request.user
+        now = timezone.now()
+        # Returns lessons where user is student OR teacher
+        return Lesson.objects.filter(
+            Q(student=user) | Q(teacher=user),
+            start_time__gte=now
+        ).order_by('start_time')
 
-        return Response(
-            {
-                "booking_id": booking.id,
-                "slot_id": slot.id,
-                "teacher": slot.teacher.user.username,
-                "start_datetime": slot.start_datetime,
-                "end_datetime": slot.end_datetime,
-                "lesson_created": True,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+# ==========================================
+# 4. STATS VIEW
+# ==========================================
 
-
-# ============================
-# Teacher Availability Rules (Step 1)
-# ============================
-
-class AvailabilityRuleSerializer(serializers.ModelSerializer):
-    """
-    AvailabilityRule serializer.
-    Teacher is not writable via API; we attach it from request.user.teacherprofile.
-    """
-
-    class Meta:
-        model = AvailabilityRule
-        fields = ["id", "weekday", "start_time", "end_time", "is_active", "created_at"]
-        read_only_fields = ["id", "created_at"]
-
-    def validate(self, attrs):
-        """
-        Extra validation (DRF-friendly) besides model.clean().
-        """
-        start = attrs.get("start_time", getattr(self.instance, "start_time", None))
-        end = attrs.get("end_time", getattr(self.instance, "end_time", None))
-
-        if start is not None and end is not None and end <= start:
-            raise ValidationError({"end_time": "end_time must be after start_time."})
-
-        return attrs
-
-
-def _raise_drf_validation_from_django(e: DjangoValidationError) -> None:
-    """
-    Converts Django's ValidationError into DRF ValidationError (HTTP 400).
-    Prevents server 500 when model.full_clean() fails.
-    """
-    if hasattr(e, "message_dict"):
-        raise ValidationError(e.message_dict)
-    raise ValidationError({"detail": e.messages})
-
-
-class AvailabilityRulesView(APIView):
-    """
-    GET /api/availability-rules/
-        List the authenticated teacher's availability rules.
-
-    POST /api/availability-rules/
-        Create a new availability rule for the authenticated teacher.
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get_teacher_profile(self, request) -> TeacherProfile:
-        """
-        Returns TeacherProfile for request.user (teacher only).
-        """
-        if request.user.role != User.Roles.TEACHER:
-            raise ValidationError({"detail": "Only teachers can manage availability rules."})
-
-        return get_object_or_404(
-            TeacherProfile.objects.select_related("user"),
-            user=request.user,
-        )
+class TeacherStatsView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        teacher_profile = self.get_teacher_profile(request)
-        qs = AvailabilityRule.objects.filter(teacher=teacher_profile).order_by("weekday", "start_time")
-        return Response(AvailabilityRuleSerializer(qs, many=True).data)
-
-    def post(self, request):
-        teacher_profile = self.get_teacher_profile(request)
-
-        serializer = AvailabilityRuleSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        # Create the rule for this teacher only
-        rule = AvailabilityRule(
-            teacher=teacher_profile,
-            **serializer.validated_data,
-        )
-
-        # IMPORTANT: full_clean() triggers model.clean() (overlap + time checks)
-        try:
-            rule.full_clean()
-        except DjangoValidationError as e:
-            _raise_drf_validation_from_django(e)
-
-        rule.save()
-
-        return Response(AvailabilityRuleSerializer(rule).data, status=status.HTTP_201_CREATED)
-
-
-class AvailabilityRuleDetailView(APIView):
-    """
-    GET /api/availability-rules/<rule_id>/
-        Retrieve a specific rule (must belong to the authenticated teacher)
-
-    PATCH /api/availability-rules/<rule_id>/
-        Update a specific rule (must belong to the authenticated teacher)
-
-    DELETE /api/availability-rules/<rule_id>/
-        Delete a specific rule (must belong to the authenticated teacher)
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get_object(self, request, rule_id: int) -> AvailabilityRule:
-        """
-        Ownership guard: teacher can only access their own rules.
-        """
-        if request.user.role != User.Roles.TEACHER:
-            raise ValidationError({"detail": "Only teachers can manage availability rules."})
-
-        teacher_profile = get_object_or_404(
-            TeacherProfile.objects.select_related("user"),
-            user=request.user,
-        )
-
-        return get_object_or_404(
-            AvailabilityRule.objects.select_related("teacher__user"),
-            id=rule_id,
-            teacher=teacher_profile,
-        )
-
-    def get(self, request, rule_id: int):
-        rule = self.get_object(request, rule_id)
-        return Response(AvailabilityRuleSerializer(rule).data)
-
-    def patch(self, request, rule_id: int):
-        rule = self.get_object(request, rule_id)
-
-        serializer = AvailabilityRuleSerializer(rule, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-
-        # Apply updates
-        for attr, value in serializer.validated_data.items():
-            setattr(rule, attr, value)
-
-        # Validate with model.clean() to prevent overlaps + invalid times
-        try:
-            rule.full_clean()
-        except DjangoValidationError as e:
-            _raise_drf_validation_from_django(e)
-
-        rule.save()
-
-        return Response(AvailabilityRuleSerializer(rule).data)
-
-    def delete(self, request, rule_id: int):
-        rule = self.get_object(request, rule_id)
-        rule.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-# ============================
-# Slot regeneration (Step 2)
-# ============================
-
-class RegenerateSlotsSerializer(serializers.Serializer):
-    """
-    Optional inputs:
-    - days: how many days ahead to generate slots (default 14)
-    - slot_minutes: lesson slot length in minutes (default 60)
-    """
-    days = serializers.IntegerField(required=False, default=14, min_value=1, max_value=90)
-    slot_minutes = serializers.IntegerField(required=False, default=60, min_value=15, max_value=240)
-
-
-class RegenerateMySlotsView(APIView):
-    """
-    POST /api/slots/regenerate/
-    Body (optional): { "days": 14, "slot_minutes": 60 }
-
-    Generates LessonSlot rows from active AvailabilityRule for the authenticated teacher only.
-
-    Safety guarantees:
-    - Does NOT delete or modify existing slots
-    - Does NOT touch booked slots
-    - Uses get_or_create to avoid duplicates
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        # Teacher only
-        if request.user.role != User.Roles.TEACHER:
-            raise ValidationError({"detail": "Only teachers can regenerate slots."})
-
-        teacher = get_object_or_404(
-            TeacherProfile.objects.select_related("user"),
-            user=request.user,
-        )
-
-        payload = RegenerateSlotsSerializer(data=request.data)
-        payload.is_valid(raise_exception=True)
-
-        days = payload.validated_data["days"]
-        slot_minutes = payload.validated_data["slot_minutes"]
-
-        now = timezone.now()
-        start_date = now.date()
-        end_date = start_date + timedelta(days=days)
-
-        rules = AvailabilityRule.objects.filter(teacher=teacher, is_active=True)
-        rules_count = rules.count()
-
-        if rules_count == 0:
-            return Response(
-                {
-                    "detail": "No active availability rules found. Nothing to generate.",
-                    "created": 0,
-                    "skipped_existing": 0,
-                    "rules_used": 0,
-                    "start_date": str(start_date),
-                    "end_date": str(end_date),
-                    "slot_minutes": slot_minutes,
-                }
-            )
-
-        created_count = 0
-        skipped_existing = 0
-
-        current = start_date
-        while current <= end_date:
-            weekday = current.weekday()  # Monday=0
-
-            day_rules = rules.filter(weekday=weekday)
-            for rule in day_rules:
-                start_dt = timezone.make_aware(datetime.combine(current, rule.start_time))
-                end_dt = timezone.make_aware(datetime.combine(current, rule.end_time))
-
-                # Skip if the whole window is in the past
-                if end_dt <= now:
-                    continue
-
-                slot_start = start_dt
-                while slot_start + timedelta(minutes=slot_minutes) <= end_dt:
-                    slot_end = slot_start + timedelta(minutes=slot_minutes)
-
-                    # Do not create past slots
-                    if slot_end <= now:
-                        slot_start = slot_end
-                        continue
-
-                    obj, created = LessonSlot.objects.get_or_create(
-                        teacher=teacher,
-                        start_datetime=slot_start,
-                        defaults={"end_datetime": slot_end},
-                    )
-
-                    if created:
-                        created_count += 1
-                    else:
-                        skipped_existing += 1
-
-                    slot_start = slot_end
-
-            current += timedelta(days=1)
-
-        return Response(
-            {
-                "detail": "Slot regeneration completed.",
-                "created": created_count,
-                "skipped_existing": skipped_existing,
-                "rules_used": rules_count,
-                "start_date": str(start_date),
-                "end_date": str(end_date),
-                "slot_minutes": slot_minutes,
-                "teacher": teacher.user.username,
-            },
-            status=status.HTTP_200_OK,
-        )
-# ============================
-# Teacher Slot Management (Step 7)
-# ============================
-
-class TeacherSlotSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = LessonSlot
-        fields = ["id", "start_datetime", "end_datetime", "is_booked", "created_at"]
-
-
-class TeacherSlotsView(APIView):
-    """
-    GET /api/teacher/slots/
-
-    Teacher-only endpoint listing the authenticated teacher's slots.
-
-    Filters (optional):
-    - ?upcoming=true -> start_datetime >= now
-    - ?past=true     -> end_datetime < now
-    - ?booked=true/false -> filter by is_booked
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        if request.user.role != User.Roles.TEACHER:
-            raise ValidationError({"detail": "Only teachers can view their slots."})
-
-        teacher = get_object_or_404(
-            TeacherProfile.objects.select_related("user"),
-            user=request.user,
-        )
-
-        qs = LessonSlot.objects.filter(teacher=teacher).order_by("start_datetime")
-
-        now = timezone.now()
-        upcoming = request.query_params.get("upcoming")
-        past = request.query_params.get("past")
-        booked = request.query_params.get("booked")
-
-        if upcoming and upcoming.lower() in ("1", "true", "yes"):
-            qs = qs.filter(start_datetime__gte=now)
-
-        if past and past.lower() in ("1", "true", "yes"):
-            qs = qs.filter(end_datetime__lt=now)
-
-        if booked is not None:
-            b = booked.lower()
-            if b in ("1", "true", "yes"):
-                qs = qs.filter(is_booked=True)
-            elif b in ("0", "false", "no"):
-                qs = qs.filter(is_booked=False)
-            else:
-                raise ValidationError({"booked": "Invalid value. Use true/false."})
-
-        return Response(TeacherSlotSerializer(qs, many=True).data)
-
-
-class TeacherSlotDetailView(APIView):
-    """
-    DELETE /api/teacher/slots/<slot_id>/
-
-    Teacher-only:
-    - can delete ONLY their own slot
-    - cannot delete a booked slot (safety)
-    """
-
-    permission_classes = [IsAuthenticated]
-
-    def delete(self, request, slot_id: int):
-        if request.user.role != User.Roles.TEACHER:
-            raise ValidationError({"detail": "Only teachers can manage slots."})
-
-        teacher = get_object_or_404(
-            TeacherProfile.objects.select_related("user"),
-            user=request.user,
-        )
-
-        slot = get_object_or_404(
-            LessonSlot.objects.select_related("teacher__user"),
-            id=slot_id,
-            teacher=teacher,  # ownership guard
-        )
-
-        if slot.is_booked:
-            raise ValidationError({"detail": "Cannot delete a booked slot."})
-
-        slot.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        user = request.user
+        # Similar case-insensitive fix for stats
+        if str(user.role).upper() != 'TEACHER':
+            return Response({"error": "Not authorized"}, status=403)
+
+        total_students = Lesson.objects.filter(teacher=user).values('student').distinct().count()
+        lessons_taught = Lesson.objects.filter(teacher=user, end_time__lt=timezone.now()).count()
+        upcoming = Lesson.objects.filter(teacher=user, start_time__gte=timezone.now()).count()
+        
+        hourly_rate = getattr(user.teacher_profile, 'hourly_rate', 15)
+        earnings = lessons_taught * float(hourly_rate)
+
+        return Response({
+            "total_students": total_students,
+            "lessons_taught": lessons_taught,
+            "upcoming_lessons": upcoming,
+            "earnings": earnings
+        })

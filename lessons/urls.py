@@ -1,13 +1,26 @@
 from django.urls import path
-from .api import MyLessonsView, TeacherLessonsView, LessonDetailView
-from .api import MyLessonsView, TeacherLessonsView, LessonDetailView, LessonStatusView
+from .views import AdminLessonUpdateView # Add import
+from .api import (
+    MyLessonsView, 
+    TeacherLessonsView, 
+    LessonDetailView, 
+    LessonStatusView
+)
 
 urlpatterns = [
-    path("my/lessons/", MyLessonsView.as_view(), name="my-lessons"),
+    # Student: Get their own lessons
+    # URL: /api/lessons/my/
+    path("my/", MyLessonsView.as_view(), name="my-lessons"),
 
-    # Teacher endpoints
-    path("teacher/lessons/", TeacherLessonsView.as_view(), name="teacher-lessons"),
-    path("lessons/<int:lesson_id>/status/", LessonStatusView.as_view(), name="lesson-status"),
+    # Teacher: Get their own lessons
+    # URL: /api/lessons/teacher/
+    path("teacher/", TeacherLessonsView.as_view(), name="teacher-lessons"),
 
-    path("lessons/<int:lesson_id>/", LessonDetailView.as_view(), name="lesson-detail"),
+    # Teacher: Update lesson details (Link, Notes)
+    # URL: /api/lessons/<id>/
+    path("<int:id>/", LessonDetailView.as_view(), name="lesson-detail"),
+    path('<int:pk>/update/', AdminLessonUpdateView.as_view(), name='admin-lesson-update'),
+    # Teacher: Update lesson status (Complete/Cancel)
+    # URL: /api/lessons/<id>/status/
+    path("<int:id>/status/", LessonStatusView.as_view(), name="lesson-status"),
 ]

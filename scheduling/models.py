@@ -1,156 +1,83 @@
 from django.db import models
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from django.conf import settings
 
-from accounts.models import TeacherProfile, StudentProfile
-
-
-class AvailabilityRule(models.Model):
-    class Weekdays(models.IntegerChoices):
-        MONDAY = 0, "Monday"
-        TUESDAY = 1, "Tuesday"
-        WEDNESDAY = 2, "Wednesday"
-        THURSDAY = 3, "Thursday"
-        FRIDAY = 4, "Friday"
-        SATURDAY = 5, "Saturday"
-        SUNDAY = 6, "Sunday"
+class Availability(models.Model):
+    """
+    Stores the weekly recurring schedule for a teacher.
+    Example: Teacher is available Mondays from 09:00 to 12:00.
+    """
+    DAYS = [
+        (0, 'Monday'),
+        (1, 'Tuesday'),
+        (2, 'Wednesday'),
+        (3, 'Thursday'),
+        (4, 'Friday'),
+        (5, 'Saturday'),
+        (6, 'Sunday'),
+    ]
 
     teacher = models.ForeignKey(
-        TeacherProfile,
-        on_delete=models.CASCADE,
-        related_name="availability_rules",
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='availabilities'
     )
-
-    weekday = models.IntegerField(choices=Weekdays.choices)
+    day_of_week = models.IntegerField(choices=DAYS)
     start_time = models.TimeField()
     end_time = models.TimeField()
 
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
     class Meta:
-        ordering = ["teacher", "weekday", "start_time"]
-        unique_together = ("teacher", "weekday", "start_time", "end_time")
+        ordering = ['day_of_week', 'start_time']
+        verbose_name_plural = "Availabilities"
 
     def clean(self):
-        """
-        Validation rules:
-        1) end_time must be after start_time
-        2) Active rules must NOT overlap with other active rules
-           for the same teacher + weekday.
-        """
-        # 1) Basic time range validation
         if self.end_time <= self.start_time:
-            raise ValidationError("end_time must be after start_time")
-
-        # 2) Prevent overlap (only among ACTIVE rules)
-        if self.is_active:
-            qs = AvailabilityRule.objects.filter(
-                teacher=self.teacher,
-                weekday=self.weekday,
-                is_active=True,
-            )
-
-            # Exclude self when updating
-            if self.pk:
-                qs = qs.exclude(pk=self.pk)
-
-            # Overlap condition:
-            # new_start < existing_end AND new_end > existing_start
-            qs = qs.filter(
-                start_time__lt=self.end_time,
-                end_time__gt=self.start_time,
-            )
-
-            if qs.exists():
-                raise ValidationError(
-                    "This availability rule overlaps with an existing active rule."
-                )
+            raise ValidationError("End time must be after start time")
 
     def __str__(self):
-        return (
-            f"{self.teacher.user.username} "
-            f"{self.get_weekday_display()} {self.start_time}-{self.end_time}"
-        )
+        return f"{self.teacher} - {self.get_day_of_week_display()} ({self.start_time}-{self.end_time})"
 
+class Lesson(models.Model):
+    """
+    Represents a specific booked lesson between a student and a teacher.
+    """
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('CONFIRMED', 'Confirmed'),
+        ('COMPLETED', 'Completed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
 
-class LessonSlot(models.Model):
     teacher = models.ForeignKey(
-        TeacherProfile,
-        on_delete=models.CASCADE,
-        related_name="lesson_slots",
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='teaching_lessons'
     )
-
-    start_datetime = models.DateTimeField()
-    end_datetime = models.DateTimeField()
-
-    is_booked = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["start_datetime"]
-        unique_together = ("teacher", "start_datetime")
-
-    def clean(self):
-        if self.end_datetime <= self.start_datetime:
-            raise ValidationError("end_datetime must be after start_datetime")
-
-        if self.start_datetime < timezone.now():
-            raise ValidationError("Cannot create slot in the past")
-
-    def __str__(self):
-        return f"{self.teacher.user.username} {self.start_datetime}"
-
-
-class LessonBooking(models.Model):
-    slot = models.OneToOneField(
-        LessonSlot,
-        on_delete=models.PROTECT,
-        related_name="booking",
-    )
-
     student = models.ForeignKey(
-        StudentProfile,
-        on_delete=models.CASCADE,
-        related_name="bookings",
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='learning_lessons'
     )
-
+    
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    meeting_link = models.URLField(blank=True, null=True)
+    notes = models.TextField(blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["-created_at"]
+        ordering = ['start_time']
 
     def clean(self):
-        # Extra guard (DB also protects via OneToOne on slot)
-        if self.slot.is_booked:
-            raise ValidationError("This slot is already booked.")
-
-    def save(self, *args, **kwargs):
-        creating = self.pk is None
-        super().save(*args, **kwargs)
-
-        # Mark slot booked after booking is created
-        if creating and not self.slot.is_booked:
-            self.slot.is_booked = True
-            self.slot.save(update_fields=["is_booked"])
-
-        # Auto-create Lesson once per booking
-        if creating:
-            from lessons.models import Lesson  # local import avoids circular imports
-
-            Lesson.objects.get_or_create(
-                booking=self,
-                defaults={
-                    "teacher": self.slot.teacher,
-                    "student": self.student,
-                    "start_datetime": self.slot.start_datetime,
-                    "end_datetime": self.slot.end_datetime,
-                },
-            )
+        if self.end_time <= self.start_time:
+            raise ValidationError("End time must be after start time")
+        
+        # Prevent booking in the past
+        if self.start_time < timezone.now():
+            raise ValidationError("Cannot book a lesson in the past")
 
     def __str__(self):
-        return (
-            f"Booking<{self.student.user.username} -> "
-            f"{self.slot.teacher.user.username} @ {self.slot.start_datetime}>"
-        )
+        return f"Lesson: {self.student} with {self.teacher} on {self.start_time.strftime('%Y-%m-%d %H:%M')}"

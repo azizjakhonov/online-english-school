@@ -1,118 +1,94 @@
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.conf import settings
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+import random
 
+# --- 0. CUSTOM USER MANAGER ---
+class UserManager(BaseUserManager):
+    def create_user(self, phone_number, password=None, **extra_fields):
+        if not phone_number:
+            raise ValueError("The Phone Number must be set")
+        user = self.model(phone_number=phone_number, **extra_fields)
+        user.set_unusable_password()
+        user.save(using=self._db)
+        return user
 
+    def create_superuser(self, phone_number, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('role', 'ADMIN')
+        
+        user = self.create_user(phone_number, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+# --- 1. THE USER MODEL ---
 class User(AbstractUser):
-    """
-    Custom User model (matches ERD: User + role-based access).
-
-    Notes:
-    - We keep Django's built-in username field for simplicity.
-    - Email is unique (ERD requirement).
-    - Role controls app-level access (Student / Teacher / Admin).
-    """
-
     class Roles(models.TextChoices):
         STUDENT = "STUDENT", "Student"
         TEACHER = "TEACHER", "Teacher"
         ADMIN = "ADMIN", "Admin"
+        NEW = "NEW", "New User"
 
-    # ✅ ERD: full_name (made optional to avoid createsuperuser / admin issues)
+    username = None 
+    email = models.EmailField(blank=True, null=True)
+    phone_number = models.CharField(max_length=15, unique=True)
     full_name = models.CharField(max_length=255, blank=True)
+    role = models.CharField(max_length=10, choices=Roles.choices, default=Roles.NEW)
 
-    # ✅ ERD: email unique
-    email = models.EmailField(unique=True)
+    USERNAME_FIELD = 'phone_number'
+    REQUIRED_FIELDS = [] 
 
-    # ✅ ERD: role
-    role = models.CharField(
-        max_length=10,
-        choices=Roles.choices,
-        default=Roles.STUDENT,
-    )
-
-    # ✅ ERD: created_at
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    # Django auth metadata
-    EMAIL_FIELD = "email"
-    REQUIRED_FIELDS = ["email"]
-
-    # Convenience role checks (keeps views/permissions clean)
-    @property
-    def is_student(self) -> bool:
-        return self.role == self.Roles.STUDENT
+    objects = UserManager()
 
     @property
-    def is_teacher(self) -> bool:
-        return self.role == self.Roles.TEACHER
-
+    def is_student(self): return self.role == self.Roles.STUDENT
     @property
-    def is_admin_role(self) -> bool:
-        return self.role == self.Roles.ADMIN
+    def is_teacher(self): return self.role == self.Roles.TEACHER
 
-    def __str__(self) -> str:
-        return f"{self.username} ({self.role})"
-from django.conf import settings
-from django.db.models.signals import post_save
-from django.dispatch import receiver
+    def __str__(self): return self.phone_number
 
+# --- 2. OTP STORAGE ---
+class PhoneOTP(models.Model):
+    phone_number = models.CharField(max_length=15, unique=True)
+    otp = models.CharField(max_length=6)
+    count = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
 
+    def __str__(self): return f"{self.phone_number} -> {self.otp}"
+
+# --- 3. PROFILES ---
 class TeacherProfile(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="teacher_profile",
-    )
-
-    bio = models.TextField(blank=True)
-    timezone = models.CharField(max_length=64, blank=True)  # e.g. "Asia/Tashkent"
-    is_accepting_students = models.BooleanField(default=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"TeacherProfile<{self.user.username}>"
-
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
+    # Basic Info
+    bio = models.TextField(blank=True, help_text="About me")
+    headline = models.CharField(max_length=100, blank=True)
+    
+    # Marketplace Fields (The missing ones causing errors!)
+    youtube_intro_url = models.URLField(blank=True, null=True)
+    hourly_rate = models.DecimalField(max_digits=6, decimal_places=2, default=15.00)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=5.00)
+    lessons_taught = models.IntegerField(default=0)
+    is_accepting_students = models.BooleanField(default=True) # <--- This was missing
+    
+    def __str__(self): return f"Teacher: {self.user.phone_number}"
 
 class StudentProfile(models.Model):
-    class Levels(models.TextChoices):
-        A1 = "A1", "A1"
-        A2 = "A2", "A2"
-        B1 = "B1", "B1"
-        B2 = "B2", "B2"
-        C1 = "C1", "C1"
-        C2 = "C2", "C2"
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
+    # Student Fields
+    lesson_credits = models.IntegerField(default=0)
+    level = models.CharField(max_length=50, blank=True, default="A1")
+    goals = models.TextField(blank=True) # <--- This was missing
+    
+    def __str__(self): return f"Student: {self.user.phone_number}"
 
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="student_profile",
-    )
-
-    level = models.CharField(
-        max_length=2,
-        choices=Levels.choices,
-        default=Levels.A1,
-    )
-    timezone = models.CharField(max_length=64, blank=True)
-    goals = models.TextField(blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"StudentProfile<{self.user.username}>"
-
-
-@receiver(post_save, sender=settings.AUTH_USER_MODEL)
-def ensure_role_profile_exists(sender, instance, created, **kwargs):
-    """
-    Auto-create the correct profile when a user is created.
-    Keeps DB consistent: teachers always have TeacherProfile, students always have StudentProfile.
-    """
-    if not created:
-        return
-
-    if instance.role == instance.Roles.TEACHER:
+# --- 4. SIGNALS ---
+@receiver(post_save, sender=User)
+def manage_user_profile(sender, instance, created, **kwargs):
+    if instance.role == User.Roles.TEACHER:
         TeacherProfile.objects.get_or_create(user=instance)
-    elif instance.role == instance.Roles.STUDENT:
+    elif instance.role == User.Roles.STUDENT:
         StudentProfile.objects.get_or_create(user=instance)

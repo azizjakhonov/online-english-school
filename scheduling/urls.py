@@ -1,28 +1,23 @@
 from django.urls import path
-
 from .api import (
-    AvailableSlotsView,
-    BookSlotView,
-    AvailabilityRulesView,
-    AvailabilityRuleDetailView,
-    RegenerateMySlotsView,
-    TeacherSlotsView,
-    TeacherSlotDetailView,
+    MyAvailabilityView, 
+    AvailabilityDeleteView, 
+    TeacherAvailabilityView,
+    BookLessonView,
+    MyLessonsView,
+    TeacherStatsView
 )
 
 urlpatterns = [
-    # Student-facing
-    path("teachers/<int:teacher_id>/slots/", AvailableSlotsView.as_view(), name="teacher-available-slots"),
-    path("bookings/", BookSlotView.as_view(), name="book-slot"),
+    # --- Availability (Setting Hours) ---
+    path('my-availability/', MyAvailabilityView.as_view(), name='my-availability'),
+    path('my-availability/<int:pk>/', AvailabilityDeleteView.as_view(), name='delete-availability'),
+    path('availability/<int:teacher_id>/', TeacherAvailabilityView.as_view(), name='teacher-availability'),
 
-    # Teacher availability rules CRUD
-    path("availability-rules/", AvailabilityRulesView.as_view(), name="availability-rules"),
-    path("availability-rules/<int:rule_id>/", AvailabilityRuleDetailView.as_view(), name="availability-rule-detail"),
+    # --- Booking & Lessons ---
+    path('bookings/', BookLessonView.as_view(), name='book-lesson'),
+    path('my-lessons/', MyLessonsView.as_view(), name='my-lessons'),
 
-    # Teacher slot generation
-    path("slots/regenerate/", RegenerateMySlotsView.as_view(), name="regenerate-my-slots"),
-
-    # NEW: Teacher slot management
-    path("teacher/slots/", TeacherSlotsView.as_view(), name="teacher-slots"),
-    path("teacher/slots/<int:slot_id>/", TeacherSlotDetailView.as_view(), name="teacher-slot-detail"),
+    # --- Stats (Teacher Dashboard) ---
+    path('teacher-stats/', TeacherStatsView.as_view(), name='teacher-stats'),
 ]

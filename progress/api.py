@@ -1,41 +1,30 @@
 from django.shortcuts import get_object_or_404
-
-from rest_framework import serializers, status
-from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+from rest_framework import serializers, status, views, permissions
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import ValidationError
 
-from accounts.models import StudentProfile, TeacherProfile, User
-from lessons.models import Lesson
-from progress.models import LessonProgress
-
+from scheduling.models import Lesson
+from .models import LessonProgress
 
 # ============================
-# Serializers
+# SERIALIZERS
 # ============================
 
 class LessonProgressSerializer(serializers.ModelSerializer):
-    average_score = serializers.SerializerMethodField()
+    average_score = serializers.FloatField(source='average_score', read_only=True)
+    teacher_name = serializers.CharField(source='lesson.teacher.full_name', read_only=True)
+    lesson_date = serializers.DateTimeField(source='lesson.start_time', read_only=True)
 
     class Meta:
         model = LessonProgress
         fields = [
-            "id",
-            "lesson",
-            "speaking",
-            "grammar",
-            "vocabulary",
-            "listening",
-            "teacher_feedback",
-            "average_score",
-            "created_at",
+            "id", "lesson", "teacher_name", "lesson_date",
+            "speaking", "grammar", "vocabulary", "listening",
+            "teacher_feedback", "average_score", "created_at"
         ]
-        read_only_fields = ["id", "lesson", "average_score", "created_at"]
-
-    def get_average_score(self, obj: LessonProgress) -> float:
-        return obj.average_score()
-
+        read_only_fields = ["id", "lesson", "created_at"]
 
 class SubmitProgressSerializer(serializers.Serializer):
     speaking = serializers.IntegerField(min_value=1, max_value=5)
@@ -44,45 +33,29 @@ class SubmitProgressSerializer(serializers.Serializer):
     listening = serializers.IntegerField(min_value=1, max_value=5)
     teacher_feedback = serializers.CharField(required=False, allow_blank=True)
 
-
 # ============================
-# Teacher submits progress
+# VIEWS
 # ============================
 
-class SubmitLessonProgressView(APIView):
+class SubmitLessonProgressView(views.APIView):
     """
-    POST /api/lessons/<lesson_id>/progress/
-
-    Teacher creates or updates LessonProgress for the lesson.
-    One progress per lesson (LessonProgress is OneToOne with Lesson).
+    POST /api/progress/submit/<lesson_id>/
+    Teacher submits scores and feedback for a lesson.
     """
+    permission_classes = [permissions.IsAuthenticated]
 
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, lesson_id: int):
-        # Only TEACHER users can submit progress
-        if request.user.role != User.Roles.TEACHER:
+    def post(self, request, lesson_id):
+        if request.user.role != 'teacher':
             raise ValidationError({"detail": "Only teachers can submit progress."})
 
-        teacher_profile = get_object_or_404(
-            TeacherProfile.objects.select_related("user"),
-            user=request.user,
-        )
-
-        lesson = get_object_or_404(
-            Lesson.objects.select_related("teacher__user", "student__user"),
-            id=lesson_id,
-        )
-
-        # Ownership check: teacher can submit only for their own lessons
-        if lesson.teacher_id != teacher_profile.id:
-            raise ValidationError({"detail": "You can only submit progress for your own lessons."})
+        # Get the lesson and ensure the requester is the teacher
+        lesson = get_object_or_404(Lesson, id=lesson_id, teacher=request.user)
 
         serializer = SubmitProgressSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
         data = serializer.validated_data
 
+        # Create or Update Progress
         progress, created = LessonProgress.objects.update_or_create(
             lesson=lesson,
             defaults={
@@ -91,64 +64,73 @@ class SubmitLessonProgressView(APIView):
                 "vocabulary": data["vocabulary"],
                 "listening": data["listening"],
                 "teacher_feedback": data.get("teacher_feedback", ""),
-            },
+            }
         )
 
         return Response(
-            {
-                "detail": "Progress created." if created else "Progress updated.",
-                "progress": LessonProgressSerializer(progress).data,
-            },
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+            LessonProgressSerializer(progress).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
         )
 
-
-# ============================
-# Student views progress history
-# ============================
-
-class MyProgressView(APIView):
+class MyProgressView(views.APIView):
     """
-    GET /api/my/progress/
-    Returns progress history for the authenticated student.
+    GET /api/progress/history/
+    Student views their past feedback/scores.
     """
-
-    permission_classes = [IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        if request.user.role != User.Roles.STUDENT:
+        if request.user.role != 'student':
             raise ValidationError({"detail": "Only students can view progress history."})
 
-        student_profile = get_object_or_404(
-            StudentProfile.objects.select_related("user"),
-            user=request.user,
-        )
+        # Get progress for lessons where the user is the student
+        progress_history = LessonProgress.objects.filter(
+            lesson__student=request.user
+        ).order_by('-created_at')
 
-        qs = (
-            LessonProgress.objects
-            .select_related("lesson", "lesson__teacher__user", "lesson__student__user")
-            .filter(lesson__student=student_profile)
-            .order_by("-created_at")
-        )
+        return Response(LessonProgressSerializer(progress_history, many=True).data)
 
-        # A student-friendly response format
-        results = []
-        for p in qs:
-            results.append(
-                {
-                    "progress_id": p.id,
-                    "lesson_id": p.lesson_id,
-                    "teacher_username": p.lesson.teacher.user.username,
-                    "start_datetime": p.lesson.start_datetime,
-                    "end_datetime": p.lesson.end_datetime,
-                    "speaking": p.speaking,
-                    "grammar": p.grammar,
-                    "vocabulary": p.vocabulary,
-                    "listening": p.listening,
-                    "average_score": p.average_score(),
-                    "teacher_feedback": p.teacher_feedback,
-                    "created_at": p.created_at,
-                }
-            )
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def student_dashboard_stats(request):
+    """
+    GET /api/progress/stats/
+    Returns aggregated stats for the student dashboard.
+    """
+    user = request.user
+    if user.role != 'student':
+        return Response({"error": "Only students have stats"}, status=403)
+    
+    # 1. Calculate Completed Lessons (Status is 'COMPLETED')
+    completed_count = Lesson.objects.filter(student=user, status='COMPLETED').count()
+    
+    # 2. Find Next Upcoming Class
+    next_class = Lesson.objects.filter(
+        student=user, 
+        start_time__gte=timezone.now(),
+        status='CONFIRMED' # Only show confirmed bookings
+    ).order_by('start_time').first()
+    
+    next_class_data = None
+    if next_class:
+        next_class_data = {
+            "time": next_class.start_time.strftime("%Y-%m-%d %H:%M"),
+            "teacher": next_class.teacher.full_name or "Teacher"
+        }
 
-        return Response(results)
+    # 3. Determine Level/Title based on progress
+    current_lesson_title = "Start Your Journey"
+    if completed_count > 0:
+        current_lesson_title = "Keep it up! 🚀"
+    
+    # Simple level calculation
+    level = "Beginner"
+    if completed_count > 10: level = "Elementary"
+    if completed_count > 30: level = "Intermediate"
+
+    return Response({
+        "completed_lessons": completed_count,
+        "next_class": next_class_data,
+        "current_lesson_title": current_lesson_title,
+        "level": level
+    })

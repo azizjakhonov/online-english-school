@@ -1,46 +1,16 @@
 from django.db import models
-from accounts.models import TeacherProfile, StudentProfile
-from scheduling.models import LessonBooking
+from scheduling.models import Lesson  # Import the main Lesson model we created earlier
 
-
-class Lesson(models.Model):
-    class Status(models.TextChoices):
-        SCHEDULED = "SCHEDULED", "Scheduled"
-        COMPLETED = "COMPLETED", "Completed"
-        MISSED = "MISSED", "Missed"
-        CANCELLED = "CANCELLED", "Cancelled"
-
-    booking = models.OneToOneField(
-        LessonBooking,
-        on_delete=models.PROTECT,
-        related_name="lesson",
-    )
-
-    teacher = models.ForeignKey(
-        TeacherProfile,
-        on_delete=models.PROTECT,
-        related_name="lessons",
-    )
-
-    student = models.ForeignKey(
-        StudentProfile,
-        on_delete=models.PROTECT,
-        related_name="lessons",
-    )
-
-    start_datetime = models.DateTimeField()
-    end_datetime = models.DateTimeField()
-
-    meeting_link = models.URLField(blank=True)
-    status = models.CharField(
-        max_length=10,
-        choices=Status.choices,
-        default=Status.SCHEDULED,
-    )
-
-    teacher_notes = models.TextField(blank=True)
-
+class LessonContent(models.Model):
+    """
+    Stores additional content for a lesson, like teacher notes or whiteboard data.
+    Linked 1-to-1 with the main Lesson in the scheduling app.
+    """
+    lesson = models.OneToOneField(Lesson, on_delete=models.CASCADE, related_name='content')
+    teacher_notes = models.TextField(blank=True, help_text="Private notes for the teacher")
+    whiteboard_data = models.JSONField(default=dict, blank=True, help_text="Canvas data for the whiteboard")
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Lesson<{self.student.user.username} with {self.teacher.user.username} @ {self.start_datetime}>"
+        return f"Content for Lesson #{self.lesson.id}"
