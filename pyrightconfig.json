@@ -1,0 +1,27 @@
+{
+  // Pylance/Pyright configuration for the OnlineSchool Django project.
+  // Tells Pyright where to find the venv and cross-app imports.
+  "venvPath": ".",
+  "venv": ".venv",
+
+  // Makes "from accounts.models import ..." etc. resolve by treating backend/ as root.
+  "extraPaths": ["backend"],
+
+  // Basic type checking — avoids false "unknown type" noise for Django internals.
+  "typeCheckingMode": "basic",
+
+  // Exclude generated / noisy directories from analysis.
+  "exclude": [
+    ".venv",
+    "frontend",
+    "**/migrations",
+    "**/node_modules"
+  ],
+
+  // Let Pyright know this is a Django project
+  "djangoSettings": "backend.settings",
+
+  // Suppress Pyright's inability to look inside some Django internals
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false
+}

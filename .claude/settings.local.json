@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 install:*)",
+      "Bash(npm run build:*)",
+      "Bash(source:*)",
+      "Bash(python manage.py check:*)",
+      "Bash(npx tsc:*)",
+      "Bash(python:*)",
+      "Bash(/c/Users/huawei/backend/.venv/Scripts/python.exe:*)",
+      "Bash(PGPASSWORD=1234 psql:*)",
+      "Bash(PGPASSWORD=1234 \"/c/Program Files/PostgreSQL/16/bin/psql.exe\":*)",
+      "Bash(PGPASSWORD=postgres \"/c/Program Files/PostgreSQL/16/bin/psql.exe\":*)",
+      "Bash(/c/Users/huawei/backend/.venv/Scripts/pip.exe install:*)"
+    ]
+  }
+}

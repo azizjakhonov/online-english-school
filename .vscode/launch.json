@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Django: Run Server",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/manage.py",
+      "args": ["runserver", "0.0.0.0:8000"],
+      "django": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend",
+        "DJANGO_SETTINGS_MODULE": "backend.settings"
+      },
+      "console": "integratedTerminal",
+      "pythonPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+    },
+    {
+      "name": "Django: Run Tests",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/manage.py",
+      "args": ["test", "accounts", "scheduling", "lessons", "--verbosity=2"],
+      "django": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend",
+        "DJANGO_SETTINGS_MODULE": "backend.settings"
+      },
+      "console": "integratedTerminal",
+      "pythonPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+    }
+  ]
+}
