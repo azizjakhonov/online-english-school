@@ -1,0 +1,70 @@
+@"
+# ========================
+# SECRETS & ENV
+# ========================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ========================
+# PYTHON / DJANGO
+# ========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+*.log
+db.sqlite3
+media/
+staticfiles/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+pyrightconfig.json
+
+# ========================
+# NODE / FRONTEND
+# ========================
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+*.tsbuildinfo
+
+# ========================
+# MOBILE APP
+# ========================
+mobileapp/node_modules/
+mobileapp/.expo/
+mobileapp/dist/
+mobileapp/build/
+mobileapp/.env
+mobileapp/.env.*
+!mobileapp/.env.example
+
+# ========================
+# EDITORS & OS
+# ========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ========================
+# MISC
+# ========================
+.claude/
+1/
+2/
+test_output.txt
+"@ | Set-Content D:\EDU\OnlineSchool\.gitignore

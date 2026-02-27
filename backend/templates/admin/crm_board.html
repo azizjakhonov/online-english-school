@@ -1,0 +1,431 @@
+{% extends 'admin/base_site.html' %}
+{% load i18n %}
+
+{% block title %}CRM Pipeline Board | {{ site_title }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    /* ── layout ── */
+    .crm-page {
+        padding: 20px;
+    }
+
+    .crm-header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+    }
+
+    .crm-header h1 {
+        font-size: 1.4rem;
+        font-weight: 700;
+        margin: 0;
+        flex: 1;
+    }
+
+    /* ── quick filters ── */
+    .filter-bar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+        align-items: center;
+    }
+
+    .filter-bar a,
+    .filter-bar span {
+        padding: 5px 14px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        border: 2px solid #e5e7eb;
+        text-decoration: none;
+        color: #374151;
+        background: #fff;
+        transition: all .15s;
+    }
+
+    .filter-bar a.active {
+        background: #111827;
+        color: #fff;
+        border-color: #111827;
+    }
+
+    .filter-bar a:hover {
+        border-color: #6b7280;
+    }
+
+    .filter-bar form {
+        display: flex;
+        gap: 6px;
+    }
+
+    .filter-bar input[type=text] {
+        padding: 5px 12px;
+        border-radius: 20px;
+        border: 2px solid #e5e7eb;
+        font-size: 12px;
+        outline: none;
+    }
+
+    .filter-bar button {
+        padding: 5px 14px;
+        border-radius: 20px;
+        border: none;
+        background: #6366f1;
+        color: #fff;
+        font-size: 12px;
+        cursor: pointer;
+    }
+
+    /* ── board ── */
+    .kanban-board {
+        display: flex;
+        gap: 14px;
+        overflow-x: auto;
+        padding-bottom: 16px;
+        min-height: 70vh;
+    }
+
+    .kanban-col {
+        flex: 0 0 240px;
+        display: flex;
+        flex-direction: column;
+        border-radius: 12px;
+        background: #f9fafb;
+        border: 2px solid #e5e7eb;
+    }
+
+    .kanban-col.drag-over {
+        border-color: #6366f1;
+        background: #eef2ff;
+    }
+
+    .col-header {
+        padding: 12px 14px 10px;
+        border-radius: 10px 10px 0 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    .col-header h3 {
+        font-size: .8rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        margin: 0;
+        color: #fff;
+    }
+
+    .col-count {
+        background: rgba(255, 255, 255, .30);
+        color: #fff;
+        border-radius: 20px;
+        padding: 1px 8px;
+        font-size: 11px;
+        font-weight: 700;
+    }
+
+    .col-cards {
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        overflow-y: auto;
+        flex: 1;
+    }
+
+    /* ── cards ── */
+    .kanban-card {
+        background: #fff;
+        border-radius: 10px;
+        border: 1px solid #e5e7eb;
+        padding: 12px 14px;
+        cursor: grab;
+        transition: box-shadow .15s, transform .1s;
+        user-select: none;
+    }
+
+    .kanban-card:hover {
+        box-shadow: 0 4px 14px rgba(0, 0, 0, .10);
+        transform: translateY(-1px);
+    }
+
+    .kanban-card.dragging {
+        opacity: .4;
+        transform: scale(.97);
+    }
+
+    .card-name {
+        font-weight: 700;
+        font-size: .85rem;
+        margin: 0 0 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .card-phone {
+        font-size: .75rem;
+        color: #6b7280;
+        margin: 0 0 8px;
+    }
+
+    .card-credits {
+        display: inline-block;
+        font-size: .72rem;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 20px;
+        margin-bottom: 6px;
+    }
+
+    .credits-ok {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .credits-low {
+        background: #fef9c3;
+        color: #92400e;
+    }
+
+    .credits-zero {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .card-dates {
+        font-size: .72rem;
+        color: #9ca3af;
+        margin: 4px 0 0;
+    }
+
+    .card-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+    }
+
+    .card-tag {
+        font-size: .68rem;
+        background: #f3f4f6;
+        border-radius: 4px;
+        padding: 1px 6px;
+        color: #4b5563;
+    }
+
+    /* ── empty col ── */
+    .col-empty {
+        text-align: center;
+        color: #d1d5db;
+        font-size: .8rem;
+        padding: 24px 8px;
+    }
+
+    /* ── toast ── */
+    #toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        background: #111827;
+        color: #fff;
+        border-radius: 10px;
+        padding: 10px 18px;
+        font-size: .85rem;
+        font-weight: 600;
+        opacity: 0;
+        transition: opacity .25s;
+        pointer-events: none;
+        z-index: 9999;
+    }
+
+    #toast.show {
+        opacity: 1;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="crm-page">
+
+    <div class="crm-header">
+        <h1>🗂️ CRM Pipeline Board</h1>
+        <a href="/admin/accounts/studentprofile/" style="font-size:12px;color:#6b7280;">→ Table view</a>
+    </div>
+
+    {# ─── Quick filters ─── #}
+    <div class="filter-bar">
+        <a href="?"
+            class="{% if not filters.has_credits and not filters.upcoming and not filters.inactive_14 and not filters.tag %}active{% endif %}">
+            All
+        </a>
+        <a href="?has_credits=1" class="{% if filters.has_credits %}active{% endif %}">Has Credits</a>
+        <a href="?upcoming=1" class="{% if filters.upcoming %}active{% endif %}">Upcoming Lesson</a>
+        <a href="?inactive_14=1" class="{% if filters.inactive_14 %}active{% endif %}">Inactive 14d</a>
+        <form method="get" action="">
+            {% if filters.has_credits %}<input type="hidden" name="has_credits" value="1">{% endif %}
+            {% if filters.upcoming %}<input type="hidden" name="upcoming" value="1">{% endif %}
+            {% if filters.inactive_14 %}<input type="hidden" name="inactive_14" value="1">{% endif %}
+            <input type="text" name="tag" value="{{ filters.tag }}" placeholder="Tag filter…" maxlength="50">
+            <button type="submit">Filter</button>
+        </form>
+    </div>
+
+    {# ─── Kanban board ─── #}
+    <div class="kanban-board" id="kanbanBoard">
+        {% for col in columns %}
+        <div class="kanban-col" data-status="{{ col.slug }}" id="col-{{ col.slug }}"
+            aria-label="{{ col.label }} column">
+            <div class="col-header" style="background:{{ col.color }}">
+                <h3>{{ col.label }}</h3>
+                <span class="col-count">{{ col.count }}</span>
+            </div>
+            <div class="col-cards" id="cards-{{ col.slug }}">
+                {% if col.cards %}
+                {% for card in col.cards %}
+                <div class="kanban-card" id="card-{{ card.id }}" draggable="true" data-id="{{ card.id }}"
+                    data-status="{{ col.slug }}" tabindex="0" aria-label="{{ card.name }}, {{ col.label }} status">
+                    <p class="card-name">{{ card.name }}</p>
+                    <p class="card-phone">{{ card.phone }}</p>
+                    <span
+                        class="card-credits {% if card.credits == 0 %}credits-zero{% elif card.credits <= 3 %}credits-low{% else %}credits-ok{% endif %}">
+                        {{ card.credits }} credit{{ card.credits|pluralize }}
+                    </span>
+                    <div class="card-dates">
+                        {% if card.last_lesson %}Last: {{ card.last_lesson|date:"d M" }}{% endif %}
+                        {% if card.next_lesson %} · Next: {{ card.next_lesson|date:"d M" }}{% endif %}
+                    </div>
+                    {% if card.tags %}
+                    <div class="card-tags">
+                        {% for tag in card.tags %}
+                        <span class="card-tag">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="col-empty">No students</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+    (function () {
+        const CSRF = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '';
+        const toast = document.getElementById('toast');
+        let toastTimer;
+
+        function showToast(msg, isError) {
+            clearTimeout(toastTimer);
+            toast.textContent = msg;
+            toast.style.background = isError ? '#ef4444' : '#111827';
+            toast.classList.add('show');
+            toastTimer = setTimeout(() => toast.classList.remove('show'), 2800);
+        }
+
+        function getCols() { return document.querySelectorAll('.kanban-col'); }
+
+        // ── Drag API ──────────────────────────────────────────────
+        let draggedCard = null;
+
+        document.querySelectorAll('.kanban-card').forEach(attachDrag);
+
+        function attachDrag(card) {
+            card.addEventListener('dragstart', e => {
+                draggedCard = card;
+                card.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', card.dataset.id);
+            });
+            card.addEventListener('dragend', () => {
+                draggedCard = null;
+                card.classList.remove('dragging');
+                getCols().forEach(c => c.classList.remove('drag-over'));
+            });
+        }
+
+        getCols().forEach(col => {
+            col.addEventListener('dragover', e => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                col.classList.add('drag-over');
+            });
+            col.addEventListener('dragleave', e => {
+                if (!col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+            });
+            col.addEventListener('drop', e => {
+                e.preventDefault();
+                col.classList.remove('drag-over');
+                if (!draggedCard) return;
+
+                const newStatus = col.dataset.status;
+                const oldStatus = draggedCard.dataset.status;
+                if (newStatus === oldStatus) return;
+
+                const studentId = draggedCard.dataset.id;
+                const cardsContainer = col.querySelector('.col-cards');
+
+                // Optimistic UI update
+                draggedCard.dataset.status = newStatus;
+                const emptyMsg = cardsContainer.querySelector('.col-empty');
+                if (emptyMsg) emptyMsg.remove();
+                cardsContainer.insertBefore(draggedCard, cardsContainer.firstChild);
+                updateColCount(col, +1);
+                const oldCol = document.getElementById('col-' + oldStatus);
+                if (oldCol) {
+                    updateColCount(oldCol, -1);
+                    const oldCards = oldCol.querySelector('.col-cards');
+                    if (oldCards && !oldCards.querySelector('.kanban-card')) {
+                        const msg = document.createElement('div');
+                        msg.className = 'col-empty';
+                        msg.textContent = 'No students';
+                        oldCards.appendChild(msg);
+                    }
+                }
+
+                // Server update
+                fetch('/admin/crm/move/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': CSRF,
+                    },
+                    body: JSON.stringify({ student_id: parseInt(studentId), crm_status: newStatus }),
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.ok) {
+                            showToast(`✅ Status updated to "${newStatus}"`);
+                        } else {
+                            showToast(`❌ Failed: ${data.error}`, true);
+                            // On failure: reload to restore correct state
+                            setTimeout(() => location.reload(), 1200);
+                        }
+                    })
+                    .catch(() => {
+                        showToast('❌ Network error — reloading…', true);
+                        setTimeout(() => location.reload(), 1200);
+                    });
+            });
+        });
+
+        function updateColCount(col, delta) {
+            const badge = col.querySelector('.col-count');
+            if (badge) badge.textContent = parseInt(badge.textContent || '0') + delta;
+        }
+    })();
+</script>
+{% endblock %}

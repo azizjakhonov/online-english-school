@@ -1,0 +1,297 @@
+/* ================================================================
+   Online School Admin — Dashboard Design System
+   File: static/admin/dashboard.css
+   ================================================================ */
+
+/* ── 1. Design Tokens ─────────────────────────────────────────── */
+:root {
+  --ds-blue-50:     #eff6ff;
+  --ds-blue-100:    #dbeafe;
+  --ds-blue-600:    #2563eb;
+
+  --ds-green-50:    #f0fdf4;
+  --ds-green-100:   #dcfce7;
+  --ds-green-600:   #16a34a;
+
+  --ds-orange-50:   #fff7ed;
+  --ds-orange-100:  #ffedd5;
+  --ds-orange-500:  #f97316;
+
+  --ds-red-50:      #fef2f2;
+  --ds-red-100:     #fee2e2;
+  --ds-red-600:     #dc2626;
+
+  --ds-purple-50:   #faf5ff;
+  --ds-purple-100:  #f3e8ff;
+  --ds-purple-600:  #9333ea;
+
+  --ds-gray-400:    #9ca3af;
+  --ds-gray-500:    #6b7280;
+  --ds-gray-700:    #374151;
+
+  --ds-shadow-card:  0 1px 3px rgba(0, 0, 0, 0.07),
+                     0 4px 12px rgba(0, 0, 0, 0.05);
+  --ds-shadow-hover: 0 4px 8px  rgba(0, 0, 0, 0.10),
+                     0 16px 32px rgba(0, 0, 0, 0.09);
+  --ds-radius:       14px;
+  --ds-transition:   all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+/* ── 2. Section Headers ───────────────────────────────────────── */
+.ds-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.ds-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ds-section-title h2 {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ds-gray-500);
+  margin: 0;
+  line-height: 1;
+}
+
+.ds-section-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+.ds-section-link {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ds-blue-600);
+  text-decoration: none;
+  letter-spacing: 0.03em;
+  opacity: 0.65;
+  transition: var(--ds-transition);
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.ds-section-link:hover {
+  opacity: 1;
+  background: var(--ds-blue-50);
+  border-color: var(--ds-blue-100);
+}
+
+
+/* ── 3. KPI Card Shell ────────────────────────────────────────── */
+.ds-kpi-card {
+  position: relative;
+  border-radius: var(--ds-radius);
+  border-width: 1px;
+  border-style: solid;
+  background: #ffffff;
+  padding: 1.1rem 1.35rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  box-shadow: var(--ds-shadow-card);
+  transition: var(--ds-transition);
+  overflow: hidden;
+}
+
+/* Coloured accent bar on top */
+.ds-kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: var(--ds-radius) var(--ds-radius) 0 0;
+}
+
+/* Color variants */
+.ds-kpi-card--blue   { border-color: var(--ds-blue-100); }
+.ds-kpi-card--blue::before   { background: var(--ds-blue-600); }
+
+.ds-kpi-card--green  { border-color: var(--ds-green-100); }
+.ds-kpi-card--green::before  { background: var(--ds-green-600); }
+
+.ds-kpi-card--orange { border-color: var(--ds-orange-100); }
+.ds-kpi-card--orange::before { background: var(--ds-orange-500); }
+
+.ds-kpi-card--red    { border-color: var(--ds-red-100); }
+.ds-kpi-card--red::before    { background: var(--ds-red-600); }
+
+.ds-kpi-card--purple { border-color: var(--ds-purple-100); }
+.ds-kpi-card--purple::before { background: var(--ds-purple-600); }
+
+/* Clickable cards lift on hover */
+.ds-kpi-card--link {
+  cursor: pointer;
+}
+.ds-kpi-card--link:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--ds-shadow-hover);
+}
+
+/* Full-card link overlay (sits above text but below interactive elements) */
+.ds-kpi-card__link-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--ds-radius);
+}
+
+
+/* ── 4. Card Inner Elements ───────────────────────────────────── */
+.ds-kpi-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.ds-kpi-card__label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ds-gray-400);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.ds-kpi-card__icon {
+  font-size: 1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0.60;
+  margin-top: 1px;
+}
+
+.ds-kpi-card__value {
+  font-size: 1.875rem;      /* same as Tailwind text-3xl */
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin: 0.1rem 0 0;
+}
+
+.ds-kpi-card--blue   .ds-kpi-card__value { color: var(--ds-blue-600); }
+.ds-kpi-card--green  .ds-kpi-card__value { color: var(--ds-green-600); }
+.ds-kpi-card--orange .ds-kpi-card__value { color: var(--ds-orange-500); }
+.ds-kpi-card--red    .ds-kpi-card__value { color: var(--ds-red-600); }
+.ds-kpi-card--purple .ds-kpi-card__value { color: var(--ds-purple-600); }
+
+.ds-kpi-card__suffix {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ds-gray-400);
+  margin-left: 0.2rem;
+  letter-spacing: 0;
+}
+
+.ds-kpi-card__hint {
+  font-size: 0.63rem;
+  color: var(--ds-gray-400);
+  font-weight: 500;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+
+/* ── 5. Alert Banners ─────────────────────────────────────────── */
+.ds-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  border-radius: 12px;
+  padding: 0.875rem 1.125rem;
+  border-width: 1px;
+  border-style: solid;
+}
+
+.ds-alert--danger {
+  background: #fff5f5;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.ds-alert--warning {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+/* Subtle pulse on danger alerts to draw attention */
+@keyframes ds-pulse-danger {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+  50%       { box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12); }
+}
+.ds-alert--danger {
+  animation: ds-pulse-danger 3s ease-in-out infinite;
+}
+
+.ds-alert__icon {
+  font-size: 1.05rem;
+  line-height: 1;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.ds-alert__msg {
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.6;
+  margin: 0;
+}
+
+
+/* ── 6. Dark-mode Support (Unfold uses .dark on <html>) ───────── */
+.dark .ds-kpi-card,
+html[data-theme="dark"] .ds-kpi-card {
+  background: #1e2533;
+  border-color: #2d3748 !important;
+}
+
+.dark .ds-kpi-card__label,
+html[data-theme="dark"] .ds-kpi-card__label { color: #718096; }
+
+.dark .ds-kpi-card__hint,
+html[data-theme="dark"] .ds-kpi-card__hint  { color: #4a5568; }
+
+.dark .ds-kpi-card__suffix,
+html[data-theme="dark"] .ds-kpi-card__suffix { color: #4a5568; }
+
+.dark .ds-section-title h2,
+html[data-theme="dark"] .ds-section-title h2 { color: #4a5568; }
+
+.dark .ds-section-link,
+html[data-theme="dark"] .ds-section-link { color: #63b3ed; }
+
+.dark .ds-section-link:hover,
+html[data-theme="dark"] .ds-section-link:hover {
+  background: rgba(99, 179, 237, 0.08);
+  border-color: rgba(99, 179, 237, 0.2);
+}
+
+.dark .ds-alert--danger,
+html[data-theme="dark"] .ds-alert--danger {
+  background: #2d1515;
+  border-color: #7f1d1d;
+  color: #fca5a5;
+}
+
+.dark .ds-alert--warning,
+html[data-theme="dark"] .ds-alert--warning {
+  background: #292110;
+  border-color: #78350f;
+  color: #fcd34d;
+}

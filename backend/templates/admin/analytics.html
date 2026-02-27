@@ -1,0 +1,268 @@
+{% extends 'admin/base_site.html' %}
+{% load i18n %}
+
+{% block title %}Analytics | {{ site_title }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .analytics-page {
+        padding: 24px;
+        max-width: 1400px;
+    }
+
+    .analytics-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+
+    .analytics-header h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 0;
+    }
+
+    .toggle-group {
+        display: flex;
+        gap: 4px;
+        background: #f3f4f6;
+        border-radius: 8px;
+        padding: 4px;
+    }
+
+    .toggle-btn {
+        padding: 6px 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        color: #6b7280;
+        background: transparent;
+        text-decoration: none;
+        transition: all .15s;
+    }
+
+    .toggle-btn.active,
+    .toggle-btn:hover {
+        background: #fff;
+        color: #111827;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, .10);
+    }
+
+    .charts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(540px, 1fr));
+        gap: 20px;
+    }
+
+    .chart-card {
+        background: #fff;
+        border-radius: 16px;
+        border: 1px solid #e5e7eb;
+        padding: 24px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, .05);
+    }
+
+    .chart-card h2 {
+        font-size: .78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: #9ca3af;
+        margin: 0 0 16px;
+    }
+
+    .chart-wrap {
+        position: relative;
+        height: 240px;
+    }
+
+    .no-data-msg {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 240px;
+        color: #9ca3af;
+        font-size: .9rem;
+        gap: 8px;
+    }
+
+    .no-data-msg svg {
+        opacity: .3;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-page">
+
+    <div class="analytics-header">
+        <h1>&#128202; Analytics</h1>
+        <nav class="toggle-group" aria-label="Date range">
+            <a href="?days=7" class="toggle-btn {% if days == 7 %}active{% endif %}">7d</a>
+            <a href="?days=30" class="toggle-btn {% if days == 30 %}active{% endif %}">30d</a>
+            <a href="?days=90" class="toggle-btn {% if days == 90 %}active{% endif %}">90d</a>
+        </nav>
+    </div>
+
+    <div class="charts-grid" id="chartsGrid">
+
+        <div class="chart-card">
+            <h2>&#128176; Revenue (UZS)</h2>
+            <div class="chart-wrap"><canvas id="chartRevenue"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+            <h2>&#127891; New Students</h2>
+            <div class="chart-wrap"><canvas id="chartStudents"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+            <h2>&#128179; Credits Sold vs Consumed</h2>
+            <div class="chart-wrap"><canvas id="chartCredits"></canvas></div>
+        </div>
+
+        <div class="chart-card">
+            <h2>&#128197; Lesson Status Breakdown</h2>
+            <div class="chart-wrap"><canvas id="chartLessons"></canvas></div>
+        </div>
+
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+    (function () {
+        'use strict';
+
+        var rev = {{ revenue_json| safe
+    }};
+    var stu = {{ students_json| safe }};
+    var crSold = {{ credits_sold_json| safe }};
+    var crCon = {{ credits_consumed_json| safe }};
+    var les = {{ lesson_status_json| safe }};
+
+    function hasData(arr) {
+        return Array.isArray(arr) && arr.length > 0 && arr.some(function (d) { return (d.value || 0) > 0; });
+    }
+
+    function showEmpty(canvasId, message) {
+        var canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        canvas.parentNode.innerHTML =
+            '<div class="no-data-msg">' +
+            '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' +
+            '<path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>' +
+            '</svg>' +
+            '<span>' + message + '</span>' +
+            '</div>';
+    }
+
+    if (typeof Chart === 'undefined') {
+        document.getElementById('chartsGrid').innerHTML =
+            '<div style="padding:32px;color:#ef4444;font-weight:600;">Chart.js failed to load. Check your network connection.</div>';
+        return;
+    }
+
+    function lineOpts() {
+        return {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+            scales: {
+                x: { grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 11 } } },
+                y: { beginAtZero: true, ticks: { font: { size: 11 } } }
+            }
+        };
+    }
+
+    if (hasData(rev)) {
+        new Chart(document.getElementById('chartRevenue'), {
+            type: 'line',
+            data: {
+                labels: rev.map(function (d) { return d.label; }),
+                datasets: [{
+                    label: 'Revenue (UZS)', data: rev.map(function (d) { return d.value; }),
+                    borderColor: '#22c55e', backgroundColor: '#22c55e20',
+                    borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5
+                }]
+            },
+            options: lineOpts()
+        });
+    } else {
+        showEmpty('chartRevenue', 'No payment data yet');
+    }
+
+    if (hasData(stu)) {
+        new Chart(document.getElementById('chartStudents'), {
+            type: 'line',
+            data: {
+                labels: stu.map(function (d) { return d.label; }),
+                datasets: [{
+                    label: 'New Students', data: stu.map(function (d) { return d.value; }),
+                    borderColor: '#3b82f6', backgroundColor: '#3b82f620',
+                    borderWidth: 2.5, fill: true, tension: 0.4, pointRadius: 3, pointHoverRadius: 5
+                }]
+            },
+            options: lineOpts()
+        });
+    } else {
+        showEmpty('chartStudents', 'No student registrations yet');
+    }
+
+    if (hasData(crSold) || hasData(crCon)) {
+        new Chart(document.getElementById('chartCredits'), {
+            type: 'bar',
+            data: {
+                labels: crSold.map(function (d) { return d.label; }),
+                datasets: [
+                    { label: 'Sold', data: crSold.map(function (d) { return d.value; }), backgroundColor: '#6366f1bb', borderRadius: 4 },
+                    { label: 'Consumed', data: crCon.map(function (d) { return d.value; }), backgroundColor: '#f59e0bbb', borderRadius: 4 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                scales: {
+                    x: { grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 11 } } },
+                    y: { beginAtZero: true, ticks: { font: { size: 11 } } }
+                }
+            }
+        });
+    } else {
+        showEmpty('chartCredits', 'No credit transactions yet');
+    }
+
+    var lesHasData = Array.isArray(les) && les.length > 0 && les.some(function (d) { return (d.value || 0) > 0; });
+    if (lesHasData) {
+        var palette = ['#22c55e', '#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#06b6d4'];
+        new Chart(document.getElementById('chartLessons'), {
+            type: 'doughnut',
+            data: {
+                labels: les.map(function (d) { return d.label; }),
+                datasets: [{
+                    data: les.map(function (d) { return d.value; }),
+                    backgroundColor: palette.slice(0, les.length), borderWidth: 2, hoverOffset: 8
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'right', labels: { font: { size: 12 }, padding: 16 } },
+                    tooltip: { callbacks: { label: function (ctx) { return ' ' + ctx.label + ': ' + ctx.parsed + ' lessons'; } } }
+                },
+                cutout: '60%'
+            }
+        });
+    } else {
+        showEmpty('chartLessons', 'No lessons recorded yet');
+    }
+
+}());
+</script>
+{% endblock %}

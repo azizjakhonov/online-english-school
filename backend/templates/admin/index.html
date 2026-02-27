@@ -1,0 +1,124 @@
+{% extends 'admin/base.html' %}
+{% load i18n humanize static %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+<link rel="stylesheet" href="{% static 'admin/dashboard.css' %}">
+{% endblock %}
+
+{% block branding %}
+    {% include "unfold/helpers/site_branding.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col gap-8">
+
+  {# ─────────────────────── ALERTS ─────────────────────── #}
+  {% if dashboard_alerts %}
+  <div class="flex flex-col gap-3">
+    {% for alert in dashboard_alerts %}
+    <div class="ds-alert ds-alert--{{ alert.level }}">
+      <span class="ds-alert__icon" aria-hidden="true">{{ alert.icon }}</span>
+      <p class="ds-alert__msg">{{ alert.message }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ─────────────────────── STUDENTS ─────────────────────── #}
+  <div>
+    <div class="ds-section-header">
+      <div class="ds-section-title">
+        <span class="ds-section-icon" aria-hidden="true">👥</span>
+        <h2>Students</h2>
+      </div>
+      <a href="/admin/accounts/user/?role=STUDENT" class="ds-section-link">View all →</a>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+      {% include "admin/_kpi_card.html" with label="Total" value=kpi_students.total color="blue" icon="👥" hint="all time" link="/admin/accounts/user/?role=STUDENT" %}
+      {% include "admin/_kpi_card.html" with label="New Today" value=kpi_students.new_today color="green" icon="✨" hint="since midnight" link="/admin/accounts/user/?role=STUDENT" %}
+      {% include "admin/_kpi_card.html" with label="New This Week" value=kpi_students.new_week color="green" icon="📈" hint="last 7 days" link="/admin/accounts/user/?role=STUDENT" %}
+      {% include "admin/_kpi_card.html" with label="Active 30d" value=kpi_students.active_30d color="purple" icon="🟢" hint="last login ≤30d" link="/admin/accounts/studentprofile/" %}
+      {% include "admin/_kpi_card.html" with label="Inactive 14d" value=kpi_students.inactive_14 color="orange" icon="💤" hint="no login 14d+" link="/admin/accounts/studentprofile/?crm_status=inactive" %}
+    </div>
+  </div>
+
+  {# ─────────────────────── LESSONS ─────────────────────── #}
+  <div>
+    <div class="ds-section-header">
+      <div class="ds-section-title">
+        <span class="ds-section-icon" aria-hidden="true">📅</span>
+        <h2>Lessons</h2>
+      </div>
+      <a href="/admin/scheduling/lesson/" class="ds-section-link">View all →</a>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+      {% include "admin/_kpi_card.html" with label="Scheduled Today" value=kpi_lessons.scheduled_today color="blue" icon="📅" hint="pending & confirmed" link="/admin/scheduling/lesson/?status=CONFIRMED" %}
+      {% include "admin/_kpi_card.html" with label="Completed Today" value=kpi_lessons.completed_today color="green" icon="✅" hint="today" link="/admin/scheduling/lesson/?status=COMPLETED" %}
+      {% include "admin/_kpi_card.html" with label="Cancelled Today" value=kpi_lessons.cancelled_today color="orange" icon="🚫" hint="today" link="/admin/scheduling/lesson/?status=CANCELLED" %}
+      {% include "admin/_kpi_card.html" with label="Absent Today" value=kpi_lessons.absent_today color="red" icon="🚶" hint="no-shows today" link="/admin/scheduling/lesson/?status=STUDENT_ABSENT" %}
+      {% include "admin/_kpi_card.html" with label="Completed This Week" value=kpi_lessons.completed_week color="green" icon="📊" hint="last 7 days" link="/admin/scheduling/lesson/?status=COMPLETED" %}
+      {% include "admin/_kpi_card.html" with label="Completed This Month" value=kpi_lessons.completed_month color="purple" icon="🏆" hint="last 30 days" link="/admin/scheduling/lesson/?status=COMPLETED" %}
+    </div>
+  </div>
+
+  {# ─────────────────────── REVENUE ─────────────────────── #}
+  <div>
+    <div class="ds-section-header">
+      <div class="ds-section-title">
+        <span class="ds-section-icon" aria-hidden="true">💰</span>
+        <h2>Revenue (UZS)</h2>
+      </div>
+      <a href="/admin/payments/payment/?status=succeeded" class="ds-section-link">View payments →</a>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {% include "admin/_kpi_card.html" with label="Today" value=kpi_revenue.today|intcomma suffix=" UZS" color="green" icon="💰" hint="since midnight" link="/admin/payments/payment/?status=succeeded" %}
+      {% include "admin/_kpi_card.html" with label="This Week" value=kpi_revenue.week|intcomma suffix=" UZS" color="green" icon="💰" hint="last 7 days" link="/admin/payments/payment/?status=succeeded" %}
+      {% include "admin/_kpi_card.html" with label="This Month" value=kpi_revenue.month|intcomma suffix=" UZS" color="blue" icon="💰" hint="last 30 days" link="/admin/payments/payment/?status=succeeded" %}
+    </div>
+  </div>
+
+  {# ─────────────────────── CREDITS ─────────────────────── #}
+  <div>
+    <div class="ds-section-header">
+      <div class="ds-section-title">
+        <span class="ds-section-icon" aria-hidden="true">🎟️</span>
+        <h2>Credits</h2>
+      </div>
+      <a href="/admin/payments/payment/" class="ds-section-link">View payments →</a>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+      {% include "admin/_kpi_card.html" with label="Sold Today" value=kpi_credits.sold_today color="green" icon="🎟️" hint="since midnight" link="/admin/payments/payment/?status=succeeded" %}
+      {% include "admin/_kpi_card.html" with label="Sold This Week" value=kpi_credits.sold_week color="green" icon="🎟️" hint="last 7 days" link="/admin/payments/payment/?status=succeeded" %}
+      {% include "admin/_kpi_card.html" with label="Sold This Month" value=kpi_credits.sold_month color="blue" icon="🎟️" hint="last 30 days" link="/admin/payments/payment/?status=succeeded" %}
+      {% include "admin/_kpi_card.html" with label="Consumed Today" value=kpi_credits.consumed_today color="orange" icon="📚" hint="lessons today" link="/admin/scheduling/lesson/?credits_consumed__exact=1" %}
+      {% include "admin/_kpi_card.html" with label="Consumed This Week" value=kpi_credits.consumed_week color="orange" icon="📚" hint="last 7 days" link="/admin/scheduling/lesson/?credits_consumed__exact=1" %}
+    </div>
+  </div>
+
+  {# ─────────────────────── TEACHERS ─────────────────────── #}
+  <div>
+    <div class="ds-section-header">
+      <div class="ds-section-title">
+        <span class="ds-section-icon" aria-hidden="true">👨‍🏫</span>
+        <h2>Teachers & Payouts</h2>
+      </div>
+      <a href="/admin/accounts/teacherprofile/" class="ds-section-link">View teachers →</a>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {% include "admin/_kpi_card.html" with label="Teachers with Lessons Today" value=kpi_teachers.with_lessons_today color="purple" icon="👨‍🏫" hint="active today" link="/admin/accounts/teacherprofile/" %}
+      {% include "admin/_kpi_card.html" with label="Pending Payout" value=kpi_teachers.pending_payout_uzs|intcomma suffix=" UZS" color="orange" icon="💵" hint="earned − paid out" link="/admin/accounts/earningsevent/" %}
+    </div>
+  </div>
+
+  {# ─────────────────────── APP LIST ─────────────────────── #}
+  <div class="flex flex-col lg:flex-row lg:gap-8">
+    <div class="grow">
+      {% include "unfold/helpers/app_list_default.html" %}
+    </div>
+    {% include "unfold/helpers/history.html" %}
+  </div>
+
+</div>
+{% endblock %}

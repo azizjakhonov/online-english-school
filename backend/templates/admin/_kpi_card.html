@@ -1,0 +1,39 @@
+{% comment %}
+Reusable KPI card partial.
+
+Required:
+  label  — display label (e.g. "Total Students")
+  value  — the number to display
+  color  — one of: blue | green | orange | red | purple
+
+Optional:
+  suffix — unit appended after value (e.g. " UZS")
+  icon   — emoji icon shown top-right (e.g. "👥")
+  hint   — tiny helper text below value (e.g. "last 30 days")
+  link   — URL; makes the whole card a clickable link
+
+Example:
+  {% include "admin/_kpi_card.html" with
+      label="Total" value=kpi_students.total color="blue"
+      icon="👥" hint="all time"
+      link="/admin/accounts/user/?role=STUDENT" %}
+{% endcomment %}
+{% load humanize %}
+<div class="ds-kpi-card ds-kpi-card--{{ color|default:'blue' }}{% if link %} ds-kpi-card--link{% endif %}">
+
+  {% if link %}<a href="{{ link }}"
+     class="ds-kpi-card__link-overlay"
+     aria-label="View {{ label }}"></a>{% endif %}
+
+  <div class="ds-kpi-card__header">
+    <p class="ds-kpi-card__label">{{ label }}</p>
+    {% if icon %}<span class="ds-kpi-card__icon" aria-hidden="true">{{ icon }}</span>{% endif %}
+  </div>
+
+  <p class="ds-kpi-card__value">
+    {{ value }}{% if suffix %}<span class="ds-kpi-card__suffix">{{ suffix }}</span>{% endif %}
+  </p>
+
+  {% if hint %}<p class="ds-kpi-card__hint">{{ hint }}</p>{% endif %}
+
+</div>
