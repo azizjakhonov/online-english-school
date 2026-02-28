@@ -1,80 +1,66 @@
 /**
- * VideoRoom.tsx — Professional PiP Video Component
+ * VideoRoom.tsx — LiveKit PiP Video Component
  * ──────────────────────────────────────────────────
- * UI IMPROVEMENTS (summary):
- *  • Role-aware video tiles: "You" (blue) / "Teacher" (violet) / "Student" (teal)
- *  • Camera-off placeholder: colored avatar with initial instead of bare User icon
- *  • Mic-muted icon overlay (top-left of tile)
- *  • Network quality indicator (top-right of local tile, via Agora network-quality event)
- *  • Loading: animated skeleton (avatar pulse + bars) replacing bare spinner
- *  • Waiting state: bouncing dots overlay when no remote participant has joined
- *  • Error state: typed (permission / device-not-found / unknown) with clean panel
- *  • Accessible: role="region", aria-label, aria-live on waiting, role="alert" on error
- *  • VideoTile memoized; stable videoRef via useCallback([videoTrack])
- *  • gap-px between tiles (matches gray-900 dark seam, cleaner than gap-2)
- *  • All colors/radii/typography match Classroom.tsx design system exactly
+ * Migrated from Agora RTC SDK to livekit-client.
  *
- * AGORA LOGIC: completely unchanged.
- *   - Module-level client singleton preserved as-is
- *   - user-published / user-unpublished handlers: line-for-line identical
- *   - join / createMicrophoneAndCameraTracks / publish: identical
- *   - Cleanup (stop/close/leave): identical
- *   - useEffect dependency arrays: identical
- *   - mic/camera setEnabled effects: identical
- *   Additions (UI-only, additive):
- *   - network-quality listener → setNetQuality (display only)
- *   - error name classification in catch block → setError (display only)
+ * UI components (VideoTile, LoadingSkeleton, ErrorPanel, WaitingOverlay)
+ * are preserved from the original design.
  *
- * ASSUMPTIONS:
- *  - VideoRoom is rendered inside a fixed-size PiP container by Classroom.tsx.
- *    Controls (mic/camera) are handled by Classroom's own control bar; VideoRoom
- *    intentionally renders NO controls (onToggleMic/onToggleCamera preserved in
- *    props for API compatibility, not used in render).
- *  - In a 1:1 session the single remote user is labelled "Teacher"; this matches
- *    the platform's use-case. If multi-party is added later, pass role via prop.
- *  - TailwindCSS v3, no animation plugin — animate-bounce and animate-pulse are
- *    core Tailwind utilities and are used here.
+ * LIVEKIT LOGIC:
+ *   - Room created with adaptiveStream + dynacast
+ *   - room.connect(livekitUrl, token) for join
+ *   - LocalParticipant camera/mic toggled via setCameraEnabled / setMicrophoneEnabled
+ *   - Remote tracks subscribed via RoomEvent.TrackSubscribed / TrackUnsubscribed
+ *   - Video elements attached natively via track.attach() / track.detach()
+ *   - ConnectionQuality mapped to legacy NetQuality display scale
+ *   - Cleanup via room.disconnect()
  */
 
-import { useEffect, useState, useCallback, memo } from 'react';
-import type {
-  IAgoraRTCClient,
-  ICameraVideoTrack,
-  IMicrophoneAudioTrack,
-  IAgoraRTCRemoteUser,
-  IRemoteVideoTrack,
-} from 'agora-rtc-sdk-ng';
-import AgoraRTC from 'agora-rtc-sdk-ng';
+import { useEffect, useState, useCallback, useRef, memo } from 'react';
+import {
+  Room,
+  RoomEvent,
+  Track,
+  ConnectionQuality,
+  type LocalParticipant,
+  type RemoteParticipant,
+  type RemoteTrackPublication,
+  type RemoteTrack,
+} from 'livekit-client';
 import { Loader2, MicOff, AlertTriangle } from 'lucide-react';
 
-// ── Public props interface (unchanged) ────────────────────────────────────────
+// ── Public props interface ─────────────────────────────────────────────────────
 export interface VideoRoomProps {
-  appId: string;
-  channelName: string;
+  livekitUrl: string;
+  roomName: string;
   token: string;
-  uid: number;
   micOn: boolean;
   cameraOn: boolean;
   onToggleMic: () => void;
   onToggleCamera: () => void;
 }
 
-// ── Module-level Agora singleton (unchanged) ──────────────────────────────────
-let client: IAgoraRTCClient | null = null;
-
 // ── Internal types ────────────────────────────────────────────────────────────
-// Agora network quality scale: 0=unknown 1=excellent 2=good 3=poor 4=bad 5=very bad 6=disconnected
+// Mapped from LiveKit ConnectionQuality to a 0-6 display scale:
+//   0=unknown/checking, 1=excellent, 2=good, 3=fair, 4=poor, 5=bad, 6=lost
 type NetQuality = 0 | 1 | 2 | 3 | 4 | 5 | 6;
-type ErrorKind  = 'permission' | 'notfound' | 'unknown';
-type RoleBadge  = 'You' | 'Teacher' | 'Student';
+type ErrorKind = 'permission' | 'notfound' | 'unknown';
+type RoleBadge = 'You' | 'Teacher' | 'Student';
 
-// Structural type satisfied by both ICameraVideoTrack and IRemoteVideoTrack
-type PlayableVideoTrack = ICameraVideoTrack | IRemoteVideoTrack;
+function lkQualityToNet(q: ConnectionQuality): NetQuality {
+  switch (q) {
+    case ConnectionQuality.Excellent: return 1;
+    case ConnectionQuality.Good: return 2;
+    case ConnectionQuality.Poor: return 4;
+    case ConnectionQuality.Lost: return 6;
+    default: return 0;
+  }
+}
 
 // ── Network quality display helpers ───────────────────────────────────────────
 function netDotClass(q: NetQuality): string {
   if (q === 0) return 'bg-gray-500';
-  if (q <= 2)  return 'bg-emerald-400';
+  if (q <= 2) return 'bg-emerald-400';
   if (q === 3) return 'bg-amber-400';
   return 'bg-red-400';
 }
@@ -82,52 +68,48 @@ function netDotClass(q: NetQuality): string {
 function netLabelText(q: NetQuality): string {
   const map: Record<NetQuality, string> = {
     0: 'Checking', 1: 'Excellent', 2: 'Good',
-    3: 'Fair',     4: 'Poor',     5: 'Bad', 6: 'Lost',
+    3: 'Fair', 4: 'Poor', 5: 'Bad', 6: 'Lost',
   };
   return map[q];
 }
 
-// ── Role-to-style lookup tables (Classroom.tsx color palette) ─────────────────
+// ── Role-to-style lookup tables ───────────────────────────────────────────────
 const roleBadgeClass: Record<RoleBadge, string> = {
   Teacher: 'bg-violet-500/90 text-white',
   Student: 'bg-teal-500/90 text-white',
-  You:     'bg-blue-500/90 text-white',
+  You: 'bg-blue-500/90 text-white',
 };
 
 const roleAvatarClass: Record<RoleBadge, string> = {
   Teacher: 'bg-violet-600',
   Student: 'bg-teal-600',
-  You:     'bg-blue-600',
+  You: 'bg-blue-600',
 };
 
 // ── VideoTile ─────────────────────────────────────────────────────────────────
 interface VideoTileProps {
-  videoTrack: PlayableVideoTrack | null | undefined;
+  /** Attach function: given a container div, attach the track's video element inside it */
+  attachVideo: (container: HTMLDivElement | null) => void;
   label: string;
   roleBadge: RoleBadge;
   cameraActive: boolean;
   micActive: boolean;
-  /** Network quality — rendered only when provided (local tile) */
   netQuality?: NetQuality;
 }
 
-/**
- * Memoized single-participant tile.
- * Handles its own ref+play lifecycle: when `videoTrack` changes,
- * useCallback produces a new ref callback → React detaches old ref (null)
- * and re-attaches new one (DOM node) → track.play(node) fires automatically.
- */
 const VideoTile = memo(function VideoTile({
-  videoTrack,
+  attachVideo,
   label,
   roleBadge,
   cameraActive,
   micActive,
   netQuality,
 }: VideoTileProps) {
-  const videoRef = useCallback(
-    (node: HTMLDivElement | null) => { if (node && videoTrack) videoTrack.play(node); },
-    [videoTrack],
+  // Use a stable callback ref — when attachVideo identity changes (track changed),
+  // React calls this with null then the new node, triggering re-attachment.
+  const containerRef = useCallback(
+    (node: HTMLDivElement | null) => { attachVideo(node); },
+    [attachVideo],
   );
 
   return (
@@ -135,7 +117,7 @@ const VideoTile = memo(function VideoTile({
 
       {/* ── Video surface ─────────────────────────────────────────────── */}
       <div
-        ref={videoRef}
+        ref={containerRef}
         className="absolute inset-0 w-full h-full"
         aria-hidden="true"
       />
@@ -179,7 +161,6 @@ const VideoTile = memo(function VideoTile({
             className={`w-1.5 h-1.5 rounded-full shrink-0 ${netDotClass(netQuality)}`}
             aria-hidden="true"
           />
-          {/* Label only visible on the larger desktop PiP size */}
           <span className="hidden md:inline text-[8px] font-semibold text-white/60 uppercase tracking-wide select-none">
             {netLabelText(netQuality)}
           </span>
@@ -191,9 +172,8 @@ const VideoTile = memo(function VideoTile({
         <div className="flex items-center gap-1 w-full bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded-md border border-white/[0.08] overflow-hidden">
           {/* Mic / live status dot */}
           <span
-            className={`shrink-0 w-1.5 h-1.5 rounded-full transition-colors duration-300 ${
-              micActive ? 'bg-emerald-400' : 'bg-red-400'
-            }`}
+            className={`shrink-0 w-1.5 h-1.5 rounded-full transition-colors duration-300 ${micActive ? 'bg-emerald-400' : 'bg-red-400'
+              }`}
             aria-hidden="true"
           />
           {/* Participant name */}
@@ -220,18 +200,13 @@ function LoadingSkeleton() {
       aria-label="Video connecting"
       role="status"
     >
-      {/* Avatar skeleton */}
       <div className="w-9 h-9 rounded-full bg-gray-700 animate-pulse" aria-hidden="true" />
-
-      {/* Spinner + label */}
       <div className="flex items-center gap-1.5">
         <Loader2 size={10} className="animate-spin text-blue-500 shrink-0" aria-hidden="true" />
         <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
           Connecting…
         </span>
       </div>
-
-      {/* Bar skeletons */}
       <div className="w-16 space-y-1 mt-0.5" aria-hidden="true">
         <div className="h-1 bg-gray-700 rounded-full animate-pulse" />
         <div className="h-1 bg-gray-700 rounded-full animate-pulse w-3/4 mx-auto" />
@@ -244,8 +219,8 @@ function LoadingSkeleton() {
 function ErrorPanel({ kind }: { kind: ErrorKind }) {
   const messages: Record<ErrorKind, string> = {
     permission: 'Permission\ndenied',
-    notfound:   'Device not\nfound',
-    unknown:    'Connection\nfailed',
+    notfound: 'Device not\nfound',
+    unknown: 'Connection\nfailed',
   };
   return (
     <div
@@ -267,7 +242,6 @@ function ErrorPanel({ kind }: { kind: ErrorKind }) {
 }
 
 // ── Waiting overlay ───────────────────────────────────────────────────────────
-// Rendered on top of the local tile when no remote participant has joined yet.
 function WaitingOverlay() {
   return (
     <div
@@ -275,7 +249,6 @@ function WaitingOverlay() {
       aria-live="polite"
       aria-label="Waiting for other participant to join"
     >
-      {/* Bouncing dots */}
       <div className="flex items-center gap-0.5" aria-hidden="true">
         {([0, 150, 300] as const).map((delay) => (
           <span
@@ -292,154 +265,207 @@ function WaitingOverlay() {
   );
 }
 
+// ── Remote participant info ────────────────────────────────────────────────────
+interface RemoteParticipantInfo {
+  participant: RemoteParticipant;
+  videoTrack: RemoteTrack | null;
+  audioMuted: boolean;
+  cameraMuted: boolean;
+}
+
 // ── Main VideoRoom component ──────────────────────────────────────────────────
 export default function VideoRoom({
-  appId,
-  channelName,
+  livekitUrl,
+  roomName,
   token,
-  uid,
   micOn,
   cameraOn,
-  // onToggleMic and onToggleCamera are not destructured here — controls are
-  // handled entirely by Classroom.tsx's control bar. The props exist in the
-  // interface for external API compatibility (matching original behaviour).
 }: VideoRoomProps) {
 
-  // ── Agora state (completely unchanged) ────────────────────────────────────
-  const [loading, setLoading]         = useState(true);
-  const [localTracks, setLocalTracks] = useState<[IMicrophoneAudioTrack, ICameraVideoTrack] | []>([]);
-  const [remoteUsers, setRemoteUsers] = useState<IAgoraRTCRemoteUser[]>([]);
-
-  // ── UI-only state (additive — does not touch Agora logic) ─────────────────
-  const [error, setError]               = useState<ErrorKind | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ErrorKind | null>(null);
   const [networkQuality, setNetQuality] = useState<NetQuality>(0);
+  const [localParticipant, setLocalParticipant] = useState<LocalParticipant | null>(null);
+  const [localCameraOn, setLocalCameraOn] = useState(cameraOn);
+  const [localMicOn, setLocalMicOn] = useState(micOn);
+  const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipantInfo[]>([]);
 
-  // ── Agora initialization effect ───────────────────────────────────────────
-  // Logic: completely unchanged (join / publish / track creation / cleanup).
-  // Additions: network-quality listener (UI display only); typed error classification.
+  // Keep room reference stable across renders for cleanup
+  const roomRef = useRef<Room | null>(null);
+
+  // ── Connect to LiveKit room ───────────────────────────────────────────────
   useEffect(() => {
+    if (!livekitUrl || !roomName || !token) return;
+
     let mounted = true;
 
-    const initAgora = async () => {
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+    });
+    roomRef.current = room;
+
+    // Helper to snapshot remote participants state
+    const refreshRemotes = () => {
+      if (!mounted) return;
+      const infos: RemoteParticipantInfo[] = [];
+      room.remoteParticipants.forEach((p) => {
+        const camPub = p.getTrackPublication(Track.Source.Camera);
+        const micPub = p.getTrackPublication(Track.Source.Microphone);
+        infos.push({
+          participant: p,
+          videoTrack: camPub?.track ?? null,
+          cameraMuted: camPub?.isMuted ?? true,
+          audioMuted: micPub?.isMuted ?? true,
+        });
+      });
+      setRemoteParticipants(infos);
+    };
+
+    // ── Event listeners ───────────────────────────────────────────────────
+    room
+      .on(RoomEvent.TrackSubscribed, (_track: RemoteTrack, _pub: RemoteTrackPublication, _participant: RemoteParticipant) => {
+        refreshRemotes();
+      })
+      .on(RoomEvent.TrackUnsubscribed, (_track: RemoteTrack, _pub: RemoteTrackPublication, _participant: RemoteParticipant) => {
+        refreshRemotes();
+      })
+      .on(RoomEvent.TrackMuted, () => refreshRemotes())
+      .on(RoomEvent.TrackUnmuted, () => refreshRemotes())
+      .on(RoomEvent.ParticipantConnected, () => refreshRemotes())
+      .on(RoomEvent.ParticipantDisconnected, () => refreshRemotes())
+      .on(RoomEvent.LocalTrackPublished, () => {
+        if (mounted) setLocalParticipant(room.localParticipant);
+      })
+      .on(RoomEvent.LocalTrackUnpublished, () => {
+        if (mounted) setLocalParticipant(room.localParticipant);
+      })
+      .on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant) => {
+        // Only track local participant's quality for the network indicator
+        if (participant.identity === room.localParticipant.identity) {
+          if (mounted) setNetQuality(lkQualityToNet(quality));
+        }
+      });
+
+    // ── Connect + publish local tracks ───────────────────────────────────
+    const connect = async () => {
       try {
-        client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
-
-        // ── Unchanged event handlers ────────────────────────────────────────
-        client.on('user-published', async (user, mediaType) => {
-          await client?.subscribe(user, mediaType);
-
-          if (mediaType === 'video') {
-            setRemoteUsers(prev => {
-              if (prev.find(u => u.uid === user.uid)) return prev;
-              return [...prev, user];
-            });
-          }
-          if (mediaType === 'audio') {
-            user.audioTrack?.play();
-          }
+        await room.connect(livekitUrl, token, {
+          autoSubscribe: true,
         });
 
-        client.on('user-unpublished', (user, mediaType) => {
-          if (mediaType === 'video') {
-            setRemoteUsers(prev => prev.filter(u => u.uid !== user.uid));
-          }
-        });
+        if (!mounted) return;
 
-        // ── UI-only addition: network quality monitoring ─────────────────────
-        client.on('network-quality', (stats) => {
-          if (mounted) setNetQuality(stats.uplinkNetworkQuality as NetQuality);
-        });
-
-        // ── Unchanged: join + create tracks + publish ───────────────────────
-        await client.join(appId, channelName, token, uid);
-
-        const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+        // Enable camera and mic according to initial prop state
+        await room.localParticipant.setCameraEnabled(cameraOn);
+        await room.localParticipant.setMicrophoneEnabled(micOn);
 
         if (mounted) {
-          setLocalTracks([audioTrack, videoTrack]);
+          setLocalParticipant(room.localParticipant);
           setLoading(false);
-          await client.publish([audioTrack, videoTrack]);
-
-          if (!micOn)    await audioTrack.setEnabled(false);
-          if (!cameraOn) await videoTrack.setEnabled(false);
+          refreshRemotes();
         }
       } catch (err) {
-        console.error('Agora RTC Initialization Failed:', err);
-        if (mounted) {
-          // UI-only: classify error for display; original console.error preserved
-          const name = (err as Error)?.name ?? '';
-          if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-            setError('permission');
-          } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-            setError('notfound');
-          } else {
-            setError('unknown');
-          }
-          setLoading(false);
+        console.error('LiveKit connection failed:', err);
+        if (!mounted) return;
+        const name = (err as Error)?.name ?? '';
+        const msg = (err as Error)?.message ?? '';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          setError('permission');
+        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          setError('notfound');
+        } else if (msg.toLowerCase().includes('permission')) {
+          setError('permission');
+        } else {
+          setError('unknown');
         }
+        setLoading(false);
       }
     };
 
-    if (token && channelName) initAgora();
+    connect();
 
-    // ── Unchanged cleanup ───────────────────────────────────────────────────
     return () => {
       mounted = false;
-      localTracks.forEach(track => { track.stop(); track.close(); });
-      if (client) { client.leave(); client = null; }
+      room.disconnect();
+      roomRef.current = null;
     };
-  // Dependency array: unchanged
-  }, [appId, channelName, token, uid]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livekitUrl, roomName, token]);
 
-  // ── Mic toggle effect (completely unchanged) ──────────────────────────────
+  // ── Mic toggle effect ────────────────────────────────────────────────────
   useEffect(() => {
-    if (localTracks[0]) localTracks[0].setEnabled(micOn);
-  }, [micOn, localTracks]);
+    setLocalMicOn(micOn);
+    if (roomRef.current?.localParticipant) {
+      roomRef.current.localParticipant.setMicrophoneEnabled(micOn).catch(console.error);
+    }
+  }, [micOn]);
 
-  // ── Camera toggle effect (completely unchanged) ───────────────────────────
+  // ── Camera toggle effect ─────────────────────────────────────────────────
   useEffect(() => {
-    if (localTracks[1]) localTracks[1].setEnabled(cameraOn);
-  }, [cameraOn, localTracks]);
+    setLocalCameraOn(cameraOn);
+    if (roomRef.current?.localParticipant) {
+      roomRef.current.localParticipant.setCameraEnabled(cameraOn).catch(console.error);
+    }
+  }, [cameraOn]);
+
+  // ── Build attach callbacks ────────────────────────────────────────────────
+
+  // Local camera attach: use the published camera track's HTMLVideoElement
+  const localCameraTrack = localParticipant
+    ?.getTrackPublication(Track.Source.Camera)?.videoTrack ?? null;
+
+  const attachLocalVideo = useCallback(
+    (container: HTMLDivElement | null) => {
+      if (!container) return;
+      // Clear previous children
+      container.innerHTML = '';
+      if (localCameraTrack && localCameraOn) {
+        const el = localCameraTrack.attach();
+        el.style.width = '100%';
+        el.style.height = '100%';
+        el.style.objectFit = 'cover';
+        el.style.position = 'absolute';
+        el.style.inset = '0';
+        container.appendChild(el);
+      }
+    },
+    [localCameraTrack, localCameraOn],
+  );
 
   // ── Render: early exit states ─────────────────────────────────────────────
   if (loading) return <LoadingSkeleton />;
-  if (error)   return <ErrorPanel kind={error} />;
+  if (error) return <ErrorPanel kind={error} />;
 
-  const hasRemote = remoteUsers.length > 0;
+  const hasRemote = remoteParticipants.length > 0;
 
-  // ── Render: main layout ───────────────────────────────────────────────────
   return (
     <div
       className="w-full h-full relative bg-gray-900 overflow-hidden"
       role="region"
       aria-label="Video call"
     >
-      {/*
-        Grid: gap-px creates a 1px dark seam between tiles (gray-900 bleeds through).
-        Single column when alone (local only + waiting overlay).
-        Two columns when remote participant is present.
-      */}
       <div className={`grid h-full gap-px ${hasRemote ? 'grid-cols-2' : 'grid-cols-1'}`}>
 
         {/* ── Local tile ─────────────────────────────────────────────── */}
         <VideoTile
-          videoTrack={localTracks[1] ?? null}
+          attachVideo={attachLocalVideo}
           label="You"
           roleBadge="You"
-          cameraActive={cameraOn}
-          micActive={micOn}
+          cameraActive={localCameraOn}
+          micActive={localMicOn}
           netQuality={networkQuality}
         />
 
         {/* ── Remote tiles ───────────────────────────────────────────── */}
-        {remoteUsers.map(user => (
-          <VideoTile
-            key={String(user.uid)}
-            videoTrack={user.videoTrack ?? null}
+        {remoteParticipants.map(({ participant, videoTrack, cameraMuted, audioMuted }) => (
+          <RemoteTile
+            key={participant.sid}
+            videoTrack={videoTrack}
+            cameraMuted={cameraMuted}
+            audioMuted={audioMuted}
             label="Teacher"
             roleBadge="Teacher"
-            cameraActive={!!user.videoTrack}
-            micActive={!!user.audioTrack}
           />
         ))}
       </div>
@@ -449,3 +475,47 @@ export default function VideoRoom({
     </div>
   );
 }
+
+// ── RemoteTile — handles its own track attachment lifecycle ────────────────────
+interface RemoteTileProps {
+  videoTrack: RemoteTrack | null;
+  cameraMuted: boolean;
+  audioMuted: boolean;
+  label: string;
+  roleBadge: RoleBadge;
+}
+
+const RemoteTile = memo(function RemoteTile({
+  videoTrack,
+  cameraMuted,
+  audioMuted,
+  label,
+  roleBadge,
+}: RemoteTileProps) {
+  const attachRemoteVideo = useCallback(
+    (container: HTMLDivElement | null) => {
+      if (!container) return;
+      container.innerHTML = '';
+      if (videoTrack && !cameraMuted) {
+        const el = videoTrack.attach();
+        el.style.width = '100%';
+        el.style.height = '100%';
+        el.style.objectFit = 'cover';
+        el.style.position = 'absolute';
+        el.style.inset = '0';
+        container.appendChild(el);
+      }
+    },
+    [videoTrack, cameraMuted],
+  );
+
+  return (
+    <VideoTile
+      attachVideo={attachRemoteVideo}
+      label={label}
+      roleBadge={roleBadge}
+      cameraActive={!cameraMuted}
+      micActive={!audioMuted}
+    />
+  );
+});

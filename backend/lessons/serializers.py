@@ -30,3 +30,4 @@ class LessonSerializer(serializers.ModelSerializer):
             'end_time', 
             'status'
         ]
+    

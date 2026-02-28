@@ -15,10 +15,12 @@ from .services import purchase_credits, get_packages, create_stripe_checkout_ses
 # ============================================================
 
 class PackageSerializer(serializers.Serializer):
-    id          = serializers.IntegerField()
-    credits     = serializers.IntegerField()
-    amount_uzs  = serializers.DecimalField(max_digits=14, decimal_places=0)
-    label       = serializers.CharField()
+    id                   = serializers.IntegerField()
+    name                 = serializers.CharField()
+    credits              = serializers.IntegerField()
+    price_uzs            = serializers.IntegerField()
+    discount_percent     = serializers.IntegerField()
+    price_per_credit_uzs = serializers.IntegerField()
 
 
 class PaymentSerializer(serializers.ModelSerializer):

@@ -242,11 +242,10 @@ export default function Classroom() {
     useState<'loading' | 'connected' | 'error'>('loading');
   const [userRole, setUserRole] = useState<'teacher' | 'student' | null>(null);
 
-  // Agora (unchanged)
-  const [agoraToken, setAgoraToken] = useState<string | null>(null);
-  const [agoraUid, setAgoraUid] = useState<number | null>(null);
-  const [agoraAppId, setAgoraAppId] = useState<string>('');
-  const [channelName, setChannelName] = useState<string>('');
+  // LiveKit
+  const [livekitToken, setLivekitToken] = useState<string | null>(null);
+  const [livekitUrl, setLivekitUrl] = useState<string>('');
+  const [roomName, setRoomName] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState('');
 
   // Media controls (unchanged)
@@ -314,20 +313,18 @@ export default function Classroom() {
         const response = await api.get(`/api/classroom/enter/${id}/`);
         const data = response.data;
 
-        const token = data.agora?.token || data.token;
-        const appId = data.agora?.appId || data.appId;
-        const channel = data.agora?.channel || data.channel;
-        const uid = data.agora?.uid || data.uid;
+        const token = data.token;
+        const url = data.livekitUrl || '';
+        const channel = data.channel;
         const role = data.role || 'student';
         const lesson = data.lesson;
 
-        if (!token) throw new Error('Missing Agora credentials.');
+        if (!token) throw new Error('Missing LiveKit credentials.');
 
         setUserRole(role);
-        setAgoraToken(token);
-        setAgoraAppId(appId);
-        setChannelName(channel);
-        setAgoraUid(uid);
+        setLivekitToken(token);
+        setLivekitUrl(url);
+        setRoomName(channel);
 
         // Migration: remove legacy over-sized lesson_data key (previously stored
         // the full lesson including base64 images, causing QuotaExceededError).
@@ -495,8 +492,8 @@ export default function Classroom() {
     if (connectionStatus !== 'connected' || !id) return;
 
     const token = localStorage.getItem('access_token');
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.hostname}:8000/ws/lesson/${id}/?token=${token}`;
+    const wsBase = import.meta.env.VITE_WS_BASE_URL || 'wss://api.allright.uz';
+    const wsUrl = `${wsBase}/ws/lesson/${id}/?token=${token}`;
 
     const socket = new WebSocket(wsUrl);
     socketRef.current = socket;
@@ -1373,12 +1370,11 @@ export default function Classroom() {
       <div
         className="fixed top-16 right-2 w-28 h-20 md:top-auto md:right-auto md:bottom-20 md:left-4 md:w-60 md:h-44 z-30 rounded-xl overflow-hidden shadow-xl ring-2 ring-white/60 bg-gray-900 transition-all duration-300"
       >
-        {agoraToken && channelName && (
+        {livekitToken && roomName && (
           <VideoRoom
-            appId={agoraAppId}
-            channelName={channelName}
-            token={agoraToken}
-            uid={agoraUid || 0}
+            livekitUrl={livekitUrl}
+            roomName={roomName}
+            token={livekitToken}
             micOn={isMicOn}
             cameraOn={isVideoOn}
             onToggleMic={() => setIsMicOn(!isMicOn)}

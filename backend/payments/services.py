@@ -23,8 +23,24 @@ PACKAGES = {
 
 
 def get_packages():
-    """Return the package catalogue as a list of dicts with id included."""
-    return [{'id': pk, **info} for pk, info in PACKAGES.items()]
+    """Return the package catalogue in frontend-ready format with UZS pricing."""
+    # Base price per credit: Starter package (500 000 UZS / 5 credits = 100 000 / credit)
+    base_price_per_credit = int(PACKAGES[1]['amount_uzs']) // PACKAGES[1]['credits']
+    result = []
+    for pk, info in PACKAGES.items():
+        credits = info['credits']
+        price_uzs = int(info['amount_uzs'])
+        price_per_credit = price_uzs // credits
+        discount_pct = max(0, round((1 - price_per_credit / base_price_per_credit) * 100))
+        result.append({
+            'id':                   pk,
+            'name':                 info['label'],
+            'credits':              credits,
+            'price_uzs':            price_uzs,
+            'discount_percent':     discount_pct,
+            'price_per_credit_uzs': price_per_credit,
+        })
+    return result
 
 
 def create_stripe_checkout_session(user, package_id: int):

@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils import timezone
 from django.core import signing
+from django.shortcuts import get_object_or_404
 
 # Local imports
 from .models import TeacherProfile, StudentProfile, UserIdentity
@@ -38,12 +39,28 @@ class UserSerializer(serializers.ModelSerializer):
 
 class TeacherProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
-    
+    average_rating = serializers.SerializerMethodField()
+    total_ratings = serializers.SerializerMethodField()
+
     class Meta:
         model = TeacherProfile
-        fields = ['id', 'user', 'bio', 'headline', 'youtube_intro_url', 
-                  'hourly_rate', 'rating', 'lessons_taught', 
-                  'is_accepting_students']
+        fields = [
+            'id', 'user', 'bio', 'headline', 'youtube_intro_url',
+            'status', 'languages', 'language_certificates',
+            'rating', 'lessons_taught', 'is_accepting_students',
+            'average_rating', 'total_ratings',
+        ]
+
+    def get_average_rating(self, obj):
+        from scheduling.models import LessonRating
+        from django.db.models import Avg
+        result = LessonRating.objects.filter(teacher=obj.user).aggregate(avg=Avg('rating'))
+        avg = result['avg']
+        return round(avg, 2) if avg is not None else None
+
+    def get_total_ratings(self, obj):
+        from scheduling.models import LessonRating
+        return LessonRating.objects.filter(teacher=obj.user).count()
 
 class StudentProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -239,8 +256,9 @@ class MeView(APIView):
             profile, _ = TeacherProfile.objects.get_or_create(user=user)
             if "bio" in data: profile.bio = data["bio"]
             if "headline" in data: profile.headline = data["headline"]
-            if "hourly_rate" in data: profile.hourly_rate = data["hourly_rate"]
             if "youtube_intro_url" in data: profile.youtube_intro_url = data["youtube_intro_url"]
+            if "languages" in data: profile.languages = data["languages"]
+            if "language_certificates" in data: profile.language_certificates = data["language_certificates"]
             profile.save()
 
         # 3. Update Student Profile
@@ -266,7 +284,7 @@ class TeachersListView(generics.ListAPIView):
     permission_classes = [AllowAny] # Changed to AllowAny so guests can see teachers
 
     def get_queryset(self):
-        queryset = TeacherProfile.objects.all().order_by('-rating')
+        queryset = TeacherProfile.objects.filter(status='active').order_by('-rating')
         
         # Search Filter
         q = self.request.query_params.get('q')
@@ -452,7 +470,8 @@ class StudentProfileView(APIView):
 
 # Fields the teacher is allowed to update via PATCH
 _TEACHER_EDITABLE_FIELDS = {
-    'bio', 'headline', 'hourly_rate', 'youtube_intro_url', 'is_accepting_students'
+    'bio', 'headline', 'youtube_intro_url', 'is_accepting_students',
+    'languages', 'language_certificates',
 }
 # Financial keys are NEVER writable (silently stripped)
 _TEACHER_FINANCIAL_KEYS = {
@@ -490,9 +509,10 @@ class TeacherSettingsView(APIView):
             'profile': {
                 'bio':                   profile.bio,
                 'headline':              profile.headline,
-                'hourly_rate':           str(profile.hourly_rate),
                 'youtube_intro_url':     profile.youtube_intro_url,
                 'is_accepting_students': profile.is_accepting_students,
+                'languages':             profile.languages,
+                'language_certificates': profile.language_certificates,
                 'rating':                str(profile.rating),
                 'lessons_taught':        profile.lessons_taught,
             },
@@ -511,9 +531,137 @@ class TeacherSettingsView(APIView):
 
         if 'bio'                   in data: profile.bio                   = data['bio']
         if 'headline'              in data: profile.headline              = data['headline']
-        if 'hourly_rate'           in data: profile.hourly_rate           = data['hourly_rate']
         if 'youtube_intro_url'     in data: profile.youtube_intro_url     = data['youtube_intro_url']
         if 'is_accepting_students' in data: profile.is_accepting_students = data['is_accepting_students']
+        if 'languages'             in data: profile.languages             = data['languages']
+        if 'language_certificates' in data: profile.language_certificates = data['language_certificates']
 
         profile.save()
         return Response({'detail': 'Profile updated.'})
+
+
+# ============================================================================
+# 7. CONNECTED ACCOUNTS
+# ============================================================================
+
+class ConnectedAccountListView(APIView):
+    """
+    GET /api/connected-accounts/
+    Returns the current user's connected social identities.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        identities = UserIdentity.objects.filter(user=request.user, is_active=True)
+        data = [
+            {
+                'provider':     i.provider,
+                'provider_id':  i.provider_id,
+                'email':        i.email,
+                'username':     i.username,
+                'connected_at': i.connected_at.isoformat() if i.connected_at else None,
+            }
+            for i in identities
+        ]
+        return Response(data)
+
+
+# ============================================================================
+# 8. ADMIN TEACHER MANAGEMENT
+# ============================================================================
+
+class IsAdminRole(permissions.BasePermission):
+    """Allow only authenticated users with role ADMIN."""
+    message = 'Only admins can access this endpoint.'
+
+    def has_permission(self, request, view):
+        return (
+            request.user
+            and request.user.is_authenticated
+            and getattr(request.user, 'role', None) == 'ADMIN'
+        )
+
+
+class AdminTeacherListView(generics.ListAPIView):
+    """
+    GET /api/admin/teachers/?status=pending|active|inactive
+    Lists all teacher profiles, optionally filtered by status. Admin only.
+    """
+    serializer_class = TeacherProfileSerializer
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get_queryset(self):
+        status_filter = self.request.query_params.get('status')
+        qs = TeacherProfile.objects.all().select_related('user').order_by('-user__date_joined')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs
+
+
+class AdminTeacherApproveView(APIView):
+    """
+    PATCH /api/admin/teachers/<teacher_id>/approve/
+    Sets a teacher's status to 'active'. Admin only.
+    """
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def patch(self, request, teacher_id):
+        profile = get_object_or_404(TeacherProfile, pk=teacher_id)
+        profile.status = TeacherProfile.Status.ACTIVE
+        profile.save(update_fields=['status'])
+        return Response({
+            'detail': f"Teacher approved.",
+            'status': profile.status,
+        })
+
+
+class AdminTeacherDeactivateView(APIView):
+    """
+    PATCH /api/admin/teachers/<teacher_id>/deactivate/
+    Sets a teacher's status to 'inactive'. Admin only.
+    """
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def patch(self, request, teacher_id):
+        profile = get_object_or_404(TeacherProfile, pk=teacher_id)
+        profile.status = TeacherProfile.Status.INACTIVE
+        profile.save(update_fields=['status'])
+        return Response({
+            'detail': f"Teacher deactivated.",
+            'status': profile.status,
+        })
+
+
+# ============================================================================
+# 9. TEACHER RATINGS (PUBLIC)
+# ============================================================================
+
+class TeacherRatingsView(APIView):
+    """
+    GET /api/teachers/<teacher_id>/ratings/
+    Public list of ratings received by a teacher.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request, teacher_id):
+        from scheduling.models import LessonRating
+        from django.db.models import Avg
+        profile = get_object_or_404(TeacherProfile, pk=teacher_id)
+        ratings = LessonRating.objects.filter(teacher=profile.user).order_by('-created_at')
+        agg = ratings.aggregate(avg=Avg('rating'))
+        data = [
+            {
+                'id':           r.id,
+                'rating':       r.rating,
+                'comment':      r.comment,
+                'student_name': r.student.full_name or r.student.phone_number,
+                'created_at':   r.created_at.isoformat(),
+            }
+            for r in ratings
+        ]
+        return Response({
+            'teacher_id':     teacher_id,
+            'average_rating': round(agg['avg'], 2) if agg['avg'] else None,
+            'total_ratings':  ratings.count(),
+            'ratings':        data,
+        })

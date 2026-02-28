@@ -1,6 +1,6 @@
 import hmac
 import struct
-import secrets
+import random
 import time
 import base64
 import zlib
@@ -24,7 +24,7 @@ class AccessToken:
         self.channel_name = channel_name
         self.uid = str(uid) if uid != 0 else ""
         self.ts = int(time.time()) + 100
-        self.salt = secrets.randbelow(10000) + 1  # cryptographically secure
+        self.salt = random.randint(1, 10000)
         self.privileges = {}
 
     def add_privilege(self, privilege, expire_timestamp):

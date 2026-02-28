@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Calendar, Clock, Video, CheckCircle, ArrowLeft,
-  Loader2
-  // Fix: Removed PlayCircle, ChevronRight
+  Loader2, Star
 } from 'lucide-react';
 import api from '../../lib/api';
 import { formatMonthShort, formatDayNum, formatTime } from '../../utils/datetime';
@@ -126,8 +125,16 @@ export default function StudentSchedule() {
                       <Video size={18} /> Join Class
                     </button>
                   ) : (
-                    <div className="flex items-center gap-2 text-green-600 font-bold bg-green-50 px-4 py-2 rounded-lg">
-                      <CheckCircle size={18} /> Completed
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                      <div className="flex items-center gap-2 text-green-600 font-bold bg-green-50 px-4 py-2 rounded-lg">
+                        <CheckCircle size={18} /> Completed
+                      </div>
+                      <button
+                        onClick={() => navigate(`/student/rate-lesson/${lesson.id}`)}
+                        className="flex items-center gap-1.5 text-sm font-bold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-4 py-2 rounded-lg transition-colors"
+                      >
+                        <Star size={16} /> Rate
+                      </button>
                     </div>
                   )}
                 </div>

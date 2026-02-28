@@ -12,7 +12,6 @@ interface Teacher {
   };
   headline: string;
   bio: string;
-  hourly_rate: string;
   rating: number;
   lessons_taught: number;
   is_accepting_students: boolean;
@@ -123,14 +122,10 @@ export default function FindTeachersPage() {
                 <p className="text-sm text-blue-600 font-medium mb-3 line-clamp-1">{teacher.headline || "Professional Teacher"}</p>
                 <p className="text-sm text-slate-500 line-clamp-2 mb-6 h-10">{teacher.bio || "No bio yet."}</p>
 
-                <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+                <div className="flex items-center pt-4 border-t border-slate-100">
                   <div className="flex items-center gap-2 text-slate-500 text-xs font-bold">
                      <Clock size={14} />
-                     {teacher.lessons_taught} lessons
-                  </div>
-                  <div className="text-right">
-                    <span className="text-lg font-black text-slate-900">${teacher.hourly_rate}</span>
-                    <span className="text-xs text-slate-400 font-medium">/hr</span>
+                     {teacher.lessons_taught} lessons taught
                   </div>
                 </div>
               </div>

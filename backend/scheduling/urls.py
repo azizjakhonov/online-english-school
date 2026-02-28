@@ -1,8 +1,8 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 from .api import (
-    MyAvailabilityView, 
-    AvailabilityDeleteView, 
+    MyAvailabilityView,
+    AvailabilityDeleteView,
     TeacherAvailabilityView,
     BookLessonView,
     MyLessonsView,
@@ -11,6 +11,7 @@ from .api import (
     TeacherLessonHistoryListView,
     TeacherLessonHistoryUpdateView,
     TeacherWrapUpView,
+    LessonRatingCreateView,
 )
 from . import views
 # Create a router and register our viewsets with it.
@@ -40,4 +41,7 @@ urlpatterns = [
 
     # --- Teacher Wrap-Up ---
     path('lessons/<int:pk>/wrap-up/', TeacherWrapUpView.as_view(), name='lesson-wrap-up'),
+
+    # --- Lesson Rating (student post-lesson) ---
+    path('lessons/<int:pk>/rate/', LessonRatingCreateView.as_view(), name='lesson-rate'),
 ]

@@ -157,6 +157,45 @@ class LessonWrapUp(models.Model):
         return f'WrapUp #{self.pk} for Lesson #{self.lesson_id}'
 
 
+class LessonRating(models.Model):
+    """
+    Post-lesson rating submitted by the student. OneToOne with Lesson.
+    Validated: lesson must be COMPLETED, student must be the lesson's student.
+    """
+    lesson = models.OneToOneField(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name='rating',
+    )
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ratings_given',
+    )
+    teacher = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ratings_received',
+    )
+    rating = models.PositiveSmallIntegerField(
+        help_text='Rating from 1 to 5',
+    )
+    comment = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Lesson Rating'
+        verbose_name_plural = 'Lesson Ratings'
+
+    def clean(self):
+        if not (1 <= self.rating <= 5):
+            raise ValidationError('Rating must be between 1 and 5.')
+
+    def __str__(self):
+        return f"Rating #{self.pk}: {self.rating}★ for Lesson #{self.lesson_id}"
+
+
 class LessonTemplate(models.Model):
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)

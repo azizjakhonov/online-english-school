@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Save, ArrowLeft, Loader2, Youtube, AlertCircle,
-  User, Briefcase, DollarSign, CheckCircle2, Camera
+  User, Briefcase, CheckCircle2, Camera
 } from 'lucide-react';
 import api from '../../lib/api';
 import Avatar from '../../components/Avatar';
@@ -13,7 +13,6 @@ interface TeacherProfileData {
   full_name: string;
   headline: string;
   bio: string;
-  hourly_rate: string;
   youtube_intro_url: string;
 }
 
@@ -32,7 +31,6 @@ export default function TeacherSettings() {
     full_name: '',
     headline: '',
     bio: '',
-    hourly_rate: '',
     youtube_intro_url: '',
   });
 
@@ -52,7 +50,6 @@ export default function TeacherSettings() {
             full_name: data.full_name || '',
             headline: data.teacher_profile?.headline || '',
             bio: data.teacher_profile?.bio || '',
-            hourly_rate: data.teacher_profile?.hourly_rate || '15.00',
             youtube_intro_url: data.teacher_profile?.youtube_intro_url || '',
           });
 
@@ -137,7 +134,6 @@ export default function TeacherSettings() {
         full_name: formData.full_name,
         headline: formData.headline,
         bio: formData.bio,
-        hourly_rate: formData.hourly_rate,
         youtube_intro_url: formData.youtube_intro_url,
       });
 
@@ -210,10 +206,6 @@ export default function TeacherSettings() {
               </div>
               <div className="space-y-3 text-left">
                 <div className="flex items-center justify-between text-sm p-3 bg-slate-50 rounded-xl border border-slate-100">
-                  <span className="text-slate-500 font-medium flex items-center gap-2"><DollarSign size={16} /> Hourly Rate</span>
-                  <span className="font-bold text-slate-900">${formData.hourly_rate}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm p-3 bg-slate-50 rounded-xl border border-slate-100">
                   <span className="text-slate-500 font-medium flex items-center gap-2"><Youtube size={16} /> Intro Video</span>
                   <span className={`font-bold ${formData.youtube_intro_url ? 'text-green-600' : 'text-slate-400'}`}>
                     {formData.youtube_intro_url ? 'Linked' : 'Not set'}
@@ -279,29 +271,16 @@ export default function TeacherSettings() {
 
                   <div className="space-y-4">
                     <label className="block text-sm font-bold text-slate-700">Teaching Details</label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">Hourly Rate ($)</label>
-                        <input
-                          name="hourly_rate"
-                          type="number"
-                          value={formData.hourly_rate}
-                          onChange={handleChange}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="15.00"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">Video Introduction</label>
-                        <input
-                          type="url"
-                          name="youtube_intro_url"
-                          value={formData.youtube_intro_url}
-                          onChange={handleChange}
-                          className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          placeholder="https://youtu.be/..."
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 mb-2">Video Introduction</label>
+                      <input
+                        type="url"
+                        name="youtube_intro_url"
+                        value={formData.youtube_intro_url}
+                        onChange={handleChange}
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="https://youtu.be/..."
+                      />
                     </div>
                   </div>
 

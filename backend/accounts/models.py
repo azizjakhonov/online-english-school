@@ -70,7 +70,7 @@ class User(AbstractUser):
 class UserIdentity(models.Model):
     """
     Links a social provider identity (Google, Telegram) to a User.
-    One user can have multiple social identities.
+    One user can have one identity per provider.
     """
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -79,9 +79,16 @@ class UserIdentity(models.Model):
     )
     provider = models.CharField(max_length=50)      # 'google' | 'telegram'
     provider_id = models.CharField(max_length=255)  # Google sub or Telegram user ID
+    email = models.CharField(max_length=255, blank=True, help_text='Email from provider (Google)')
+    username = models.CharField(max_length=255, blank=True, help_text='Username from provider (Telegram)')
+    connected_at = models.DateTimeField(auto_now_add=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ('provider', 'provider_id')
+        unique_together = [
+            ('provider', 'provider_id'),  # a social account can only link to one user
+            ('user', 'provider'),          # a user can only have one account per provider
+        ]
 
     def __str__(self):
         return f"{self.provider}:{self.provider_id} → {self.user}"
@@ -98,13 +105,37 @@ class PhoneOTP(models.Model):
 
 # --- 3. PROFILES ---
 class TeacherProfile(models.Model):
+    class Status(models.TextChoices):
+        PENDING  = 'pending',  'Pending Review'
+        ACTIVE   = 'active',   'Active'
+        INACTIVE = 'inactive', 'Inactive'
+
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher_profile")
     bio = models.TextField(blank=True, help_text="About me")
     headline = models.CharField(max_length=100, blank=True)
-    languages = models.CharField(max_length=255, null=True, blank=True)
+
+    # Status for admin approval flow
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+        help_text='Only active teachers are shown in the public listing',
+    )
+
+    # Language proficiency — array of {"language": str, "proficiency": str}
+    languages = models.JSONField(
+        default=list, blank=True,
+        help_text='List of {language, proficiency} objects. Proficiency: Native|Fluent|Intermediate|Basic',
+    )
+    # Certificates — array of {"certificate_name", "score", "issued_date", "certificate_file_url"}
+    language_certificates = models.JSONField(
+        default=list, blank=True,
+        help_text='List of {certificate_name, score, issued_date, certificate_file_url} objects',
+    )
+
     subjects = models.CharField(max_length=255, blank=True, null=True)
     youtube_intro_url = models.URLField(blank=True, null=True)
-    hourly_rate = models.DecimalField(max_digits=6, decimal_places=2, default=15.00)
     rating = models.DecimalField(max_digits=3, decimal_places=2, default=5.00)
     lessons_taught = models.IntegerField(default=0)
     is_accepting_students = models.BooleanField(default=True)
@@ -112,7 +143,7 @@ class TeacherProfile(models.Model):
     # --- EARNINGS CONFIG ---
     rate_per_lesson_uzs = models.DecimalField(
         max_digits=12, decimal_places=0, default=0,
-        help_text="Teacher\'s pay per 1-hour lesson in UZS (set by admin)"
+        help_text="Teacher's pay per 1-hour lesson in UZS (set by admin)"
     )
     payout_day = models.PositiveSmallIntegerField(
         default=25,

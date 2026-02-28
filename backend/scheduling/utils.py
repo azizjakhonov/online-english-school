@@ -1,37 +1,22 @@
-import time
 import os
 from django.conf import settings
+from livekit import api
+import logging as _logging
 
-# Use relative import for the local agora_token_builder package
-from .agora_token_builder.RtcTokenBuilder import RtcTokenBuilder
+_log = _logging.getLogger(__name__)
 
-AGORA_APP_ID = getattr(settings, 'AGORA_APP_ID', os.environ.get('AGORA_APP_ID', ''))
-AGORA_APP_CERTIFICATE = getattr(settings, 'AGORA_APP_CERTIFICATE', os.environ.get('AGORA_APP_CERTIFICATE', ''))
+LIVEKIT_URL = getattr(settings, 'LIVEKIT_URL', os.environ.get('LIVEKIT_URL', ''))
+LIVEKIT_API_KEY = getattr(settings, 'LIVEKIT_API_KEY', os.environ.get('LIVEKIT_API_KEY', ''))
+LIVEKIT_API_SECRET = getattr(settings, 'LIVEKIT_API_SECRET', os.environ.get('LIVEKIT_API_SECRET', ''))
 
-def generate_lesson_token(room_sid, uid, role_num=1):
-    """
-    Generates a secure Agora Token.
-
-    Args:
-        room_sid: The UUID of the lesson (acts as channel name)
-        uid: The user's numeric ID
-        role_num: 1 = Publisher (Teacher/Student), 2 = Subscriber
-                  (Defaults to 1 so we don't have to pass it every time)
-    """
-    # Token valid for 2 hours (3600 * 2 seconds)
-    expiration_in_seconds = 3600 * 2
-    current_timestamp = int(time.time())
-    privilege_expired_ts = current_timestamp + expiration_in_seconds
-
-    # Ensure channel name is a string
-    channel_name = str(room_sid)
-
-    token = RtcTokenBuilder.buildTokenWithUid(
-        AGORA_APP_ID,
-        AGORA_APP_CERTIFICATE,
-        channel_name,
-        uid,
-        role_num,
-        privilege_expired_ts
-    )
-    return token
+def generate_lesson_token(room_name, user_id, user_name='', is_publisher=True):
+    token = api.AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET)
+    token.with_identity(str(user_id))
+    token.with_name(user_name or str(user_id))
+    token.with_grants(api.VideoGrants(
+        room_join=True,
+        room=str(room_name),
+        can_publish=is_publisher,
+        can_subscribe=True,
+    ))
+    return token.to_jwt()

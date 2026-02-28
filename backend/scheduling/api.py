@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from .models import Availability, Lesson
 from accounts.models import TeacherProfile
-from .utils import generate_lesson_token, AGORA_APP_ID
+from .utils import generate_lesson_token, LIVEKIT_URL
 from rest_framework.views import APIView
 User = get_user_model()
 
@@ -222,18 +222,11 @@ class TeacherStatsView(views.APIView):
         total_students = Lesson.objects.filter(teacher=user).values('student').distinct().count()
         lessons_taught = Lesson.objects.filter(teacher=user, end_time__lt=timezone.now()).count()
         upcoming = Lesson.objects.filter(teacher=user, start_time__gte=timezone.now()).count()
-        
-        hourly_rate = 15
-        if hasattr(user, 'teacher_profile'):
-             hourly_rate = getattr(user.teacher_profile, 'hourly_rate', 15)
-        
-        earnings = lessons_taught * float(hourly_rate)
 
         return Response({
-            "total_students": total_students,
-            "lessons_taught": lessons_taught,
+            "total_students":   total_students,
+            "lessons_taught":   lessons_taught,
             "upcoming_lessons": upcoming,
-            "earnings": earnings
         })
 
 # ==========================================
@@ -259,17 +252,22 @@ class EnterClassroomView(views.APIView):
                 status=403
             )
 
-        # Generate Agora Token using the secure UID
-        token = generate_lesson_token(str(room_sid), user.id)
+        # Generate LiveKit Token
+        token = generate_lesson_token(
+            room_name=str(room_sid),
+            user_id=user.id,
+            user_name=user.full_name or str(user.id),
+            is_publisher=True
+        )
 
         teacher_name = lesson.teacher.full_name or "Teacher"
         teacher_avatar = None
-        if lesson.teacher.profile_picture:
+        if lesson.teacher.profile_picture:             
             teacher_avatar = request.build_absolute_uri(lesson.teacher.profile_picture.url)
 
         return Response({
             "token": token,
-            "appId": AGORA_APP_ID,
+            "livekitUrl": LIVEKIT_URL,
             "channel": str(room_sid),
             "uid": user.id,
             "role": "teacher" if is_teacher else "student",
@@ -552,3 +550,71 @@ class TeacherWrapUpView(APIView):
             'credits_consumed': lesson.credits_consumed,
             'wrap_up': LessonWrapUpSerializer(wrap_up).data,
         })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LESSON RATING  (POST /api/scheduling/lessons/<pk>/rate/)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LessonRatingCreateView(views.APIView):
+    """
+    POST /api/scheduling/lessons/<pk>/rate/
+    Student submits a 1-5 star rating for a COMPLETED lesson.
+    OneToOne on LessonRating enforces one rating per lesson.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        lesson = get_object_or_404(Lesson, pk=pk)
+
+        # Only the lesson's student may rate
+        if lesson.student_id != request.user.pk:
+            return Response(
+                {'error': 'Only the lesson student can submit a rating.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Lesson must be COMPLETED
+        if lesson.status != 'COMPLETED':
+            return Response(
+                {'error': 'You can only rate completed lessons.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate rating value (1–5)
+        rating_val = request.data.get('rating')
+        try:
+            rating_val = int(rating_val)
+            if not (1 <= rating_val <= 5):
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'rating must be an integer from 1 to 5.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        comment = request.data.get('comment', '').strip()
+
+        from .models import LessonRating
+        rating_obj, created = LessonRating.objects.get_or_create(
+            lesson=lesson,
+            defaults={
+                'student': request.user,
+                'teacher': lesson.teacher,
+                'rating':  rating_val,
+                'comment': comment,
+            },
+        )
+
+        if not created:
+            return Response(
+                {'error': 'You have already rated this lesson.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'detail':    'Rating submitted.',
+            'lesson_id': lesson.pk,
+            'rating':    rating_obj.rating,
+            'comment':   rating_obj.comment,
+        }, status=status.HTTP_201_CREATED)

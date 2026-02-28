@@ -184,7 +184,7 @@ export default function BuyCredits() {
             <p className="text-sm text-slate-500 font-medium mt-0.5">Fits your learning goals</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {PACKAGES.map(pkg => (
               <div
                 key={pkg.id}

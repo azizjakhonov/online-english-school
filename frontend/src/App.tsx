@@ -31,6 +31,12 @@ import StudentAchievements from './features/dashboard/StudentAchievements';
 import StudentGoals from './features/dashboard/StudentGoals';
 import Leaderboard from './features/dashboard/Leaderboard';
 import TeacherLessonHistory from './features/dashboard/TeacherLessonHistory';
+import TeacherLoginPage from './features/teachers/TeacherLoginPage';
+import TeacherRegisterPage from './features/teachers/TeacherRegisterPage';
+import TeacherVerifyOtpPage from './features/teachers/TeacherVerifyOtpPage';
+import TeacherOnboardingPage from './features/teachers/TeacherOnboardingPage';
+import TeacherPendingApprovalPage from './features/teachers/TeacherPendingApprovalPage';
+import RateLessonPage from './features/students/RateLessonPage';
 
 
 // 1. ProtectedRoute Wrapper
@@ -92,6 +98,12 @@ function App() {
           {/* EDIT Routes (The :id tells it to load existing data) */}
           <Route path="/builder/lesson/:id" element={<LessonBuilder />} />
           <Route path="/builder/homework/:id" element={<LessonBuilder />} />
+          {/* Teacher auth flow */}
+          <Route path="/teacher/login" element={<TeacherLoginPage />} />
+          <Route path="/teacher/register" element={<TeacherRegisterPage />} />
+          <Route path="/teacher/verify-otp" element={<TeacherVerifyOtpPage />} />
+          <Route path="/teacher/onboarding" element={<TeacherOnboardingPage />} />
+          <Route path="/teacher/pending-approval" element={<TeacherPendingApprovalPage />} />
           <Route path="/teacher/settings" element={<TeacherSettings />} />
           <Route path="/teacher/:id" element={<TeacherProfilePage />} />
           <Route path="/find-teachers" element={<FindTeachersPage />} />
@@ -102,6 +114,7 @@ function App() {
           <Route path="/student/homework" element={<StudentHomework />} />
           <Route path="/teacher/homework" element={<TeacherHomework />} />
 
+          <Route path="/student/rate-lesson/:lessonId" element={<RateLessonPage />} />
           <Route path="/student/quiz/:id" element={<StudentQuiz />} />
           <Route path="/admin/homeworks" element={<AdminHomeworks />} />
 

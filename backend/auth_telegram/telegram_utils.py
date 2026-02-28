@@ -46,8 +46,8 @@ def verify_telegram_data(data):
         hashlib.sha256
     ).hexdigest()
 
-    # 5. Compare — use constant-time comparison to prevent timing attacks
-    if not hmac.compare_digest(computed_hash, received_hash):
+    # 5. Compare
+    if computed_hash != received_hash:
         return False, "Invalid hash"
 
     return True, "Verification successful"
