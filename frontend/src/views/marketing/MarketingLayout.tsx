@@ -17,7 +17,8 @@ const NAV = [
 export default function MarketingLayout() {
   const { user } = useAuth()
 
-  if (!user?.is_superuser && user?.role !== 'marketing') {
+  const role = user?.role?.toUpperCase()
+  if (!user?.is_superuser && role !== 'ADMIN' && role !== 'MARKETING') {
     return <Navigate to="/dashboard" replace />
   }
 
