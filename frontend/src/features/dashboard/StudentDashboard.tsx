@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import api from '../../lib/api';
 import BannerCarousel from './ui/BannerCarousel';
+import { BannerCarousel as MarketingBannerCarousel } from '../../components/marketing/BannerCarousel';
 import { formatDate, formatMonthShort, formatDayNum, formatTime } from '../../utils/datetime';
 
 
@@ -151,8 +152,10 @@ export default function StudentDashboard({ user: initialUser }: StudentDashboard
           </button>
         </header>
 
-        {/* CAMPAIGN BANNERS */}
+        {/* CAMPAIGN BANNERS — existing placement-based carousel */}
         <BannerCarousel placement="student_home_top" />
+        {/* MARKETING BANNERS — managed via Marketing Dashboard */}
+        <MarketingBannerCarousel audience="student" />
 
         {/* STATS GRID */}
 

@@ -100,6 +100,7 @@ INSTALLED_APPS = [
     'payments',   # Credit purchase history & billing
     'banners',
     'auth_telegram',
+    'marketing',
 ]
 
 MIDDLEWARE = [
@@ -319,3 +320,26 @@ SECURE_HSTS_PRELOAD = not DEBUG
 LIVEKIT_URL = os.getenv('LIVEKIT_URL', '')
 LIVEKIT_API_KEY = os.getenv('LIVEKIT_API_KEY', '')
 LIVEKIT_API_SECRET = os.getenv('LIVEKIT_API_SECRET', '')
+
+# ─── Analytics ───────────────────────────────────────────────────────────────
+GOOGLE_ANALYTICS_MEASUREMENT_ID = os.getenv('GA_MEASUREMENT_ID', '')
+MIXPANEL_TOKEN = os.getenv('MIXPANEL_TOKEN', '')
+POSTHOG_API_KEY = os.getenv('POSTHOG_API_KEY', '')
+POSTHOG_HOST = os.getenv('POSTHOG_HOST', 'https://app.posthog.com')
+
+# ─── Messaging ───────────────────────────────────────────────────────────────
+SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
+SENDGRID_FROM_EMAIL = os.getenv('SENDGRID_FROM_EMAIL', 'noreply@yourdomain.com')
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID', '')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN', '')
+TWILIO_FROM_NUMBER = os.getenv('TWILIO_FROM_NUMBER', '')
+
+# Resend (email campaigns — replaces SendGrid for marketing module)
+RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'noreply@yourdomain.com')
+
+# ─── Push ────────────────────────────────────────────────────────────────────
+EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send'
+WEB_PUSH_VAPID_PUBLIC_KEY = os.getenv('VAPID_PUBLIC_KEY', '')
+WEB_PUSH_VAPID_PRIVATE_KEY = os.getenv('VAPID_PRIVATE_KEY', '')
+WEB_PUSH_VAPID_ADMIN_EMAIL = os.getenv('VAPID_ADMIN_EMAIL', '')

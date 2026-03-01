@@ -5,7 +5,8 @@ export interface User {
   username: string;
   email: string;
   full_name?: string;
-  role: 'student' | 'teacher' | 'admin';
+  role: 'student' | 'teacher' | 'admin' | 'marketing';
+  is_superuser?: boolean;
   profile_picture_url?: string | null;
   timezone?: string | null;
 }

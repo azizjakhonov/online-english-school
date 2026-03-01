@@ -1,11 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   CreditCard, Wallet, Check, ArrowLeft,
-  Loader2, ShieldCheck, CheckCircle2, XCircle
+  Loader2, ShieldCheck, CheckCircle2, XCircle, Tag,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { formatUZS } from '../../lib/formatCurrency';
+
+interface DiscountResult {
+  code: string
+  discount_type: 'percent' | 'fixed' | 'free_credits'
+  discount_value: number
+  discount_amount: number
+  free_credits: number
+}
 
 // --- TYPES ---
 interface CreditPackage {
@@ -53,6 +61,10 @@ export default function BuyCredits() {
   const [showModal, setShowModal] = useState(false);
   const [lastPurchased, setLastPurchased] = useState(0);
   const [paymentCancelled, setPaymentCancelled] = useState(false);
+  const [promoInput, setPromoInput] = useState('');
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoError, setPromoError] = useState('');
+  const [appliedDiscount, setAppliedDiscount] = useState<DiscountResult | null>(null);
 
   // Fetch balance on mount, and handle Stripe redirect callbacks (?payment=success/cancel)
   useEffect(() => {
@@ -84,6 +96,28 @@ export default function BuyCredits() {
     init();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleApplyPromo = useCallback(async () => {
+    const code = promoInput.trim().toUpperCase();
+    if (!code) return;
+    const pkg = PACKAGES.find(p => p.id === selectedPkg);
+    if (!pkg) return;
+    setPromoLoading(true);
+    setPromoError('');
+    setAppliedDiscount(null);
+    try {
+      const res = await api.post('/api/marketing/discount-codes/validate/', {
+        code,
+        amount: pkg.price_uzs,
+      });
+      setAppliedDiscount(res.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setPromoError(e?.response?.data?.error ?? 'Invalid discount code.');
+    } finally {
+      setPromoLoading(false);
+    }
+  }, [promoInput, selectedPkg]);
+
   const handlePurchase = async () => {
     setIsProcessing(true);
     setPaymentCancelled(false);
@@ -91,9 +125,10 @@ export default function BuyCredits() {
       const pkg = PACKAGES.find(p => p.id === selectedPkg);
       if (!pkg) return;
 
-      const response = await api.post('/api/payments/purchase/', {
-        package_id: pkg.id,
-      });
+      const body: Record<string, unknown> = { package_id: pkg.id };
+      if (appliedDiscount) body.discount_code = appliedDiscount.code;
+
+      const response = await api.post('/api/payments/purchase/', body);
 
       if (response.data.checkoutUrl) {
         // Stripe flow: save package info for the return trip, then redirect
@@ -188,7 +223,7 @@ export default function BuyCredits() {
             {PACKAGES.map(pkg => (
               <div
                 key={pkg.id}
-                onClick={() => setSelectedPkg(pkg.id)}
+                onClick={() => { setSelectedPkg(pkg.id); setAppliedDiscount(null); setPromoInput(''); setPromoError(''); }}
                 className={`relative cursor-pointer rounded-2xl border-2 p-5 bg-white shadow-sm transition-all ${selectedPkg === pkg.id ? 'border-blue-600 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-300'}`}
               >
                 {pkg.popular && (
@@ -243,7 +278,7 @@ export default function BuyCredits() {
               </div>
             </div>
 
-            <div className="space-y-4 mb-6">
+            <div className="space-y-4 mb-5">
               <div className="flex justify-between items-center">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Package</span>
                 <span className="text-base font-black text-slate-900">{selectedPackage?.credits} Credits</span>
@@ -252,10 +287,63 @@ export default function BuyCredits() {
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Subtotal</span>
                 <span className="text-base font-black text-slate-900">{formatUZS(selectedPackage?.price_uzs)}</span>
               </div>
+              {appliedDiscount && appliedDiscount.discount_amount > 0 && (
+                <div className="flex justify-between items-center text-emerald-600">
+                  <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1">
+                    <Tag size={11} /> {appliedDiscount.code}
+                  </span>
+                  <span className="text-sm font-bold">−{formatUZS(appliedDiscount.discount_amount)}</span>
+                </div>
+              )}
+              {appliedDiscount && appliedDiscount.free_credits > 0 && (
+                <div className="flex justify-between items-center text-emerald-600">
+                  <span className="text-xs font-semibold uppercase tracking-wider">Free Credits</span>
+                  <span className="text-sm font-bold">+{appliedDiscount.free_credits}</span>
+                </div>
+              )}
               <div className="border-t border-slate-100 pt-3 flex justify-between items-center">
                 <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Total Due</span>
-                <span className="text-xl font-black text-blue-600">{formatUZS(selectedPackage?.price_uzs)}</span>
+                <span className="text-xl font-black text-blue-600">
+                  {formatUZS(appliedDiscount ? Math.max(0, (selectedPackage?.price_uzs ?? 0) - appliedDiscount.discount_amount) : selectedPackage?.price_uzs)}
+                </span>
               </div>
+            </div>
+
+            {/* Promo code input */}
+            <div className="mb-4 space-y-2">
+              {appliedDiscount ? (
+                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                  <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
+                    <CheckCircle2 size={13} /> Code <strong>{appliedDiscount.code}</strong> applied
+                  </span>
+                  <button
+                    onClick={() => { setAppliedDiscount(null); setPromoInput(''); setPromoError(''); }}
+                    className="text-emerald-500 hover:text-emerald-700 text-sm leading-none font-bold"
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    value={promoInput}
+                    onChange={e => { setPromoInput(e.target.value); setPromoError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && handleApplyPromo()}
+                    placeholder="Promo code"
+                    className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase placeholder:normal-case"
+                  />
+                  <button
+                    onClick={handleApplyPromo}
+                    disabled={promoLoading || !promoInput.trim()}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-40 flex items-center gap-1"
+                  >
+                    {promoLoading ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
+                  </button>
+                </div>
+              )}
+              {promoError && (
+                <p className="text-xs text-red-500 font-medium">{promoError}</p>
+              )}
             </div>
 
             <button

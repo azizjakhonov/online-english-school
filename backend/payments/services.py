@@ -103,6 +103,7 @@ def purchase_credits(
     card_brand: str = '',
     card_holder_name: str = '',
     metadata: dict = None,
+    amount_uzs_override: Decimal = None,   # set by discount-code logic in the view
 ) -> Payment:
     """
     Atomically:
@@ -120,10 +121,12 @@ def purchase_credits(
 
     from accounts.models import StudentProfile  # avoid circular import at module level
 
+    final_amount_uzs = amount_uzs_override if amount_uzs_override is not None else package['amount_uzs']
+
     payment = Payment.objects.create(
         student=user,
         credits_amount=package['credits'],
-        amount_uzs=package['amount_uzs'],
+        amount_uzs=final_amount_uzs,
         method=method,
         provider=provider,
         status=Payment.Status.PENDING,

@@ -1,13 +1,53 @@
 import stripe
+from decimal import Decimal
+
 from django.conf import settings as django_settings
 from django.db import transaction
+from django.db.models import F
 from rest_framework import generics, status, serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from .models import Payment
-from .services import purchase_credits, get_packages, create_stripe_checkout_session
+from .services import purchase_credits, get_packages, create_stripe_checkout_session, PACKAGES
+
+
+# ─── Discount code helper ─────────────────────────────────────────────────────
+
+def _apply_discount(code_str: str, user, base_amount_uzs: Decimal):
+    """
+    Validate a discount code for this user + amount and return
+    (discounted_amount_uzs, code_obj).  Raises ValueError with a user-friendly
+    message on any validation failure.
+    """
+    from marketing.models import DiscountCode, DiscountCodeUsage  # lazy to avoid circular
+
+    try:
+        code = DiscountCode.objects.get(code=code_str.upper())
+    except DiscountCode.DoesNotExist:
+        raise ValueError('Invalid discount code.')
+
+    if not code.is_valid:
+        raise ValueError('This discount code has expired or reached its usage limit.')
+
+    used_count = DiscountCodeUsage.objects.filter(code=code, user=user).count()
+    if used_count >= code.max_uses_per_user:
+        raise ValueError('You have already used this discount code the maximum number of times.')
+
+    if base_amount_uzs < Decimal(str(code.min_purchase_amount)):
+        raise ValueError(
+            f'Minimum purchase of {int(code.min_purchase_amount):,} UZS required for this code.'
+        )
+
+    if code.discount_type == 'percent':
+        discount = (base_amount_uzs * Decimal(str(code.discount_value)) / Decimal('100')).quantize(Decimal('1'))
+    elif code.discount_type == 'fixed':
+        discount = min(Decimal(str(code.discount_value)), base_amount_uzs)
+    else:  # free_credits — no UZS reduction; free credits added separately
+        discount = Decimal('0')
+
+    return base_amount_uzs - discount, code
 
 
 # ============================================================
@@ -90,14 +130,35 @@ class PurchaseCreditsView(APIView):
         except (TypeError, ValueError):
             return Response({'error': 'package_id is required and must be an integer.'}, status=400)
 
+        package_info = PACKAGES.get(package_id)
+        if package_info is None:
+            return Response({'error': f'Invalid package_id: {package_id}'}, status=400)
+
+        # ── Optional discount code ────────────────────────────────────────────
+        discount_code_str = (request.data.get('discount_code') or '').strip()
+        discount_code_obj = None
+        amount_uzs_override = None
+
+        if discount_code_str:
+            try:
+                amount_uzs_override, discount_code_obj = _apply_discount(
+                    discount_code_str, user, package_info['amount_uzs']
+                )
+            except ValueError as exc:
+                return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         stripe_key = getattr(django_settings, 'STRIPE_SECRET_KEY', '')
         if stripe_key:
             # --- Stripe checkout flow ---
+            # Discount stored in metadata; Stripe-level coupon support is a future enhancement.
             try:
                 payment, checkout_url = create_stripe_checkout_session(
                     user=user,
                     package_id=package_id,
                 )
+                if discount_code_obj:
+                    payment.metadata = {**payment.metadata, 'discount_code': discount_code_str}
+                    payment.save(update_fields=['metadata'])
             except ValueError as e:
                 return Response({'error': str(e)}, status=400)
             except Exception:
@@ -112,11 +173,34 @@ class PurchaseCreditsView(APIView):
             payment = purchase_credits(
                 user=user,
                 package_id=package_id,
+                amount_uzs_override=amount_uzs_override,
             )
         except ValueError as e:
             return Response({'error': str(e)}, status=400)
         except Exception:
             return Response({'error': 'Purchase failed. Please try again.'}, status=500)
+
+        # Record discount usage after a successful payment
+        if discount_code_obj is not None:
+            from marketing.models import DiscountCode, DiscountCodeUsage
+            original_amount = package_info['amount_uzs']
+            DiscountCodeUsage.objects.create(
+                code=discount_code_obj,
+                user=user,
+                payment=payment,
+                discount_applied=original_amount - payment.amount_uzs,
+            )
+            DiscountCode.objects.filter(pk=discount_code_obj.pk).update(
+                times_used=F('times_used') + 1
+            )
+            # free_credits type: also grant the promised extra credits
+            if discount_code_obj.discount_type == 'free_credits':
+                from accounts.models import StudentProfile
+                free = int(discount_code_obj.discount_value)
+                with transaction.atomic():
+                    profile, _ = StudentProfile.objects.select_for_update().get_or_create(user=user)
+                    profile.lesson_credits = profile.lesson_credits + free
+                    profile.save(update_fields=['lesson_credits'])
 
         user.refresh_from_db()
         new_balance = getattr(user.student_profile, 'lesson_credits', 0)
