@@ -291,3 +291,102 @@ class PaymentDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return Payment.objects.filter(student=self.request.user)
+
+
+# ============================================================================
+# SUBSCRIPTION PACKAGES  (the new Package / StudentPackage models)
+# ============================================================================
+from .models import Package, StudentPackage
+
+
+class LessonPackageListView(generics.ListAPIView):
+    """
+    GET /api/payments/lesson-packages/
+    Lists all active lesson packages (bundles of N lessons, not credit packages).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        packages = Package.objects.filter(is_active=True).order_by('price')
+        return Response([
+            {
+                'id':             p.id,
+                'title':          p.title,
+                'lessons_count':  p.lessons_count,
+                'price':          str(p.price),
+                'currency':       p.currency,
+                'validity_days':  p.validity_days,
+            }
+            for p in packages
+        ])
+
+
+class StudentPackageView(APIView):
+    """
+    GET  /api/payments/my-packages/    — student's active packages
+    POST /api/payments/my-packages/    — purchase a package { "package_id": <id> }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _get_student(self, user):
+        if not hasattr(user, 'student_profile'):
+            return None, Response({'error': 'Only students can access packages.'}, status=403)
+        return user.student_profile, None
+
+    def get(self, request):
+        profile, err = self._get_student(request.user)
+        if err:
+            return err
+        pkgs = (
+            StudentPackage.objects
+            .filter(student=profile)
+            .select_related('package')
+            .order_by('-created_at')
+        )
+        return Response([
+            {
+                'id':                sp.id,
+                'package_id':        sp.package.id,
+                'package_title':     sp.package.title,
+                'lessons_count':     sp.package.lessons_count,
+                'remaining_lessons': sp.remaining_lessons,
+                'expires_at':        sp.expires_at.isoformat() if sp.expires_at else None,
+                'status':            sp.status,
+                'status_label':      sp.get_status_display(),
+                'created_at':        sp.created_at.isoformat(),
+            }
+            for sp in pkgs
+        ])
+
+    def post(self, request):
+        profile, err = self._get_student(request.user)
+        if err:
+            return err
+
+        package_id = request.data.get('package_id')
+        try:
+            pkg = Package.objects.get(pk=package_id, is_active=True)
+        except Package.DoesNotExist:
+            return Response({'error': 'Package not found or inactive.'}, status=404)
+
+        from django.utils import timezone
+        import datetime
+
+        expires_at = None
+        if pkg.validity_days:
+            expires_at = timezone.now() + datetime.timedelta(days=pkg.validity_days)
+
+        sp = StudentPackage.objects.create(
+            student=profile,
+            package=pkg,
+            remaining_lessons=pkg.lessons_count,
+            expires_at=expires_at,
+            status=StudentPackage.Status.ACTIVE,
+        )
+        return Response({
+            'id':                sp.id,
+            'package_title':     sp.package.title,
+            'remaining_lessons': sp.remaining_lessons,
+            'expires_at':        sp.expires_at.isoformat() if sp.expires_at else None,
+            'status':            sp.status,
+        }, status=status.HTTP_201_CREATED)

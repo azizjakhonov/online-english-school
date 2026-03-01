@@ -152,6 +152,51 @@ class TeacherProfile(models.Model):
 
     def __str__(self): return f"Teacher: {self.user.phone_number}"
 
+
+# --- SUBJECT NORMALIZATION ---
+class Subject(models.Model):
+    """
+    Normalised subject entity. Replaces the free-text JSON 'subjects' field
+    on TeacherProfile over time; the old field is preserved during migration.
+    """
+    name       = models.CharField(max_length=100, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Subject'
+        verbose_name_plural = 'Subjects'
+        ordering = ['name']
+
+    def __str__(self): return self.name
+
+
+class TeacherSubject(models.Model):
+    """
+    Many-to-many link between a TeacherProfile and a Subject.
+    Each (teacher, subject) pair can appear only once.
+    """
+    teacher = models.ForeignKey(
+        TeacherProfile,
+        on_delete=models.CASCADE,
+        related_name='teacher_subjects',
+        db_index=True,
+    )
+    subject = models.ForeignKey(
+        Subject,
+        on_delete=models.CASCADE,
+        related_name='teacher_subjects',
+        db_index=True,
+    )
+
+    class Meta:
+        unique_together = [('teacher', 'subject')]
+        verbose_name = 'Teacher Subject'
+        verbose_name_plural = 'Teacher Subjects'
+
+    def __str__(self):
+        return f"{self.teacher} – {self.subject}"
+
+
 class StudentProfile(models.Model):
     class CRMStatus(models.TextChoices):
         LEAD     = 'lead',     'Lead'
@@ -314,6 +359,44 @@ class EarningsEvent(models.Model):
         teacher_str = getattr(self.teacher, 'full_name', None) or self.teacher.phone_number
         sign = '+' if self.amount_uzs >= 0 else ''
         return f"{teacher_str} | {self.get_event_type_display()} | {sign}{self.amount_uzs} UZS"
+
+
+# --- TEACHER PAYOUT SYSTEM ---
+class TeacherPayout(models.Model):
+    """
+    Represents an explicit payout request from a teacher.
+    Distinct from EarningsEvent (which is an automatic ledger entry).
+    This model tracks the admin approval workflow: REQUESTED → APPROVED → PAID.
+    """
+    class Status(models.TextChoices):
+        REQUESTED = 'REQUESTED', 'Requested'
+        APPROVED  = 'APPROVED',  'Approved'
+        PAID      = 'PAID',      'Paid'
+        REJECTED  = 'REJECTED',  'Rejected'
+
+    teacher      = models.ForeignKey(
+        'TeacherProfile',
+        on_delete=models.CASCADE,
+        related_name='payouts',
+        db_index=True,
+    )
+    amount       = models.DecimalField(max_digits=14, decimal_places=2)
+    currency     = models.CharField(max_length=3, default='UZS')
+    status       = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.REQUESTED,
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    notes        = models.TextField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Teacher Payout'
+        verbose_name_plural = 'Teacher Payouts'
+        ordering = ['-requested_at']
+
+    def __str__(self):
+        name = str(self.teacher)
+        return f"Payout #{self.id} | {name} | {self.amount} {self.currency} | {self.status}"
 
 
 # --- 5. ACTIVITY FEED ---

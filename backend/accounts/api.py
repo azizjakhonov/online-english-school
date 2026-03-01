@@ -665,3 +665,147 @@ class TeacherRatingsView(APIView):
             'total_ratings':  ratings.count(),
             'ratings':        data,
         })
+
+
+# ============================================================================
+# 10. SUBJECT NORMALIZATION
+# ============================================================================
+from .models import Subject, TeacherSubject
+
+
+class SubjectListView(generics.ListAPIView):
+    """
+    GET /api/subjects/
+    Returns all normalized subjects for the teacher subject picker.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        subjects = Subject.objects.all().order_by('name')
+        return Response([{'id': s.id, 'name': s.name} for s in subjects])
+
+
+class TeacherSubjectView(APIView):
+    """
+    GET  /api/teacher-subjects/   — teacher's linked subjects
+    POST /api/teacher-subjects/   — link a subject  { "subject_id": <id> }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _check_teacher(self, user):
+        if not hasattr(user, 'teacher_profile'):
+            return None, Response({'error': 'Only teachers can manage subjects.'}, status=403)
+        return user.teacher_profile, None
+
+    def get(self, request):
+        profile, err = self._check_teacher(request.user)
+        if err:
+            return err
+        links = TeacherSubject.objects.filter(teacher=profile).select_related('subject')
+        return Response([
+            {'id': ts.id, 'subject_id': ts.subject.id, 'name': ts.subject.name}
+            for ts in links
+        ])
+
+    def post(self, request):
+        profile, err = self._check_teacher(request.user)
+        if err:
+            return err
+
+        subject_id = request.data.get('subject_id')
+        try:
+            subject = Subject.objects.get(pk=subject_id)
+        except Subject.DoesNotExist:
+            return Response({'error': 'Subject not found.'}, status=404)
+
+        ts, created = TeacherSubject.objects.get_or_create(teacher=profile, subject=subject)
+        return Response(
+            {'id': ts.id, 'subject_id': ts.subject.id, 'name': ts.subject.name},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class TeacherSubjectDeleteView(APIView):
+    """
+    DELETE /api/teacher-subjects/<id>/
+    Removes the link between a teacher and a subject.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        if not hasattr(request.user, 'teacher_profile'):
+            return Response({'error': 'Only teachers can manage subjects.'}, status=403)
+        profile = request.user.teacher_profile
+        ts = get_object_or_404(TeacherSubject, pk=pk, teacher=profile)
+        ts.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ============================================================================
+# 11. TEACHER PAYOUT
+# ============================================================================
+from .models import TeacherPayout
+
+
+class TeacherPayoutListCreateView(APIView):
+    """
+    GET  /api/payouts/   — teacher's payout history
+    POST /api/payouts/   — request a new payout  { "amount": <decimal>, "notes": "..." }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _check_teacher(self, user):
+        if not hasattr(user, 'teacher_profile'):
+            return None, Response({'error': 'Only teachers can access payouts.'}, status=403)
+        return user.teacher_profile, None
+
+    def get(self, request):
+        profile, err = self._check_teacher(request.user)
+        if err:
+            return err
+        payouts = TeacherPayout.objects.filter(teacher=profile).order_by('-requested_at')
+        return Response([
+            {
+                'id':           p.id,
+                'amount':       str(p.amount),
+                'currency':     p.currency,
+                'status':       p.status,
+                'status_label': p.get_status_display(),
+                'notes':        p.notes,
+                'requested_at': p.requested_at.isoformat(),
+                'processed_at': p.processed_at.isoformat() if p.processed_at else None,
+            }
+            for p in payouts
+        ])
+
+    def post(self, request):
+        profile, err = self._check_teacher(request.user)
+        if err:
+            return err
+
+        amount = request.data.get('amount')
+        notes  = request.data.get('notes', '')
+
+        if not amount:
+            return Response({'error': 'amount is required.'}, status=400)
+        try:
+            from decimal import Decimal
+            amount = Decimal(str(amount))
+            if amount <= 0:
+                raise ValueError
+        except (ValueError, Exception):
+            return Response({'error': 'amount must be a positive number.'}, status=400)
+
+        payout = TeacherPayout.objects.create(
+            teacher=profile,
+            amount=amount,
+            notes=notes,
+        )
+        return Response({
+            'id':           payout.id,
+            'amount':       str(payout.amount),
+            'currency':     payout.currency,
+            'status':       payout.status,
+            'status_label': payout.get_status_display(),
+            'requested_at': payout.requested_at.isoformat(),
+        }, status=status.HTTP_201_CREATED)

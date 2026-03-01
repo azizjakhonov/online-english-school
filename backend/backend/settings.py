@@ -101,6 +101,7 @@ INSTALLED_APPS = [
     'banners',
     'auth_telegram',
     'marketing',
+    'gamification',     # Coin / gamification system
 ]
 
 MIDDLEWARE = [

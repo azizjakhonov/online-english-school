@@ -42,6 +42,9 @@ import StudentAchievements from './features/dashboard/StudentAchievements';
 import StudentGoals from './features/dashboard/StudentGoals';
 import Leaderboard from './features/dashboard/Leaderboard';
 import TeacherLessonHistory from './features/dashboard/TeacherLessonHistory';
+import StudentEnrollments from './features/dashboard/StudentEnrollments';
+import StudentPackages from './features/dashboard/StudentPackages';
+import StudentCoins from './features/dashboard/StudentCoins';
 import TeacherLoginPage from './features/teachers/TeacherLoginPage';
 import TeacherRegisterPage from './features/teachers/TeacherRegisterPage';
 import TeacherVerifyOtpPage from './features/teachers/TeacherVerifyOtpPage';
@@ -159,6 +162,9 @@ function App() {
             <Route path="/student/leaderboard" element={<Leaderboard />} />
             <Route path="/student/rate-lesson/:lessonId" element={<RateLessonPage />} />
             <Route path="/student/quiz/:id" element={<StudentQuiz />} />
+            <Route path="/student/enrollments" element={<StudentEnrollments />} />
+            <Route path="/student/packages" element={<StudentPackages />} />
+            <Route path="/student/coins" element={<StudentCoins />} />
 
             {/* Builder / lesson creation */}
             <Route path="/builder/lesson/new" element={<LessonBuilder />} />

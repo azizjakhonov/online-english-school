@@ -8,6 +8,8 @@ from .api import (
     ConnectedAccountListView,
     AdminTeacherListView, AdminTeacherApproveView, AdminTeacherDeactivateView,
     TeacherRatingsView,
+    SubjectListView, TeacherSubjectView, TeacherSubjectDeleteView,
+    TeacherPayoutListCreateView,
 )
 from .views import AddCreditsView, MockPurchaseCreditsView, AvatarUploadView
 
@@ -49,6 +51,14 @@ urlpatterns = [
     path('student/add-credits/', AddCreditsView.as_view(),          name='add-credits'),
     path('add-credits/',         AddCreditsView.as_view(),          name='add-credits-alt'),
     path('mock-purchase/',       MockPurchaseCreditsView.as_view(), name='mock-purchase'),
+
+    # --- SUBJECTS (normalized) ---
+    path('subjects/',                   SubjectListView.as_view(),         name='subject-list'),
+    path('teacher-subjects/',           TeacherSubjectView.as_view(),      name='teacher-subject-list'),
+    path('teacher-subjects/<int:pk>/',  TeacherSubjectDeleteView.as_view(), name='teacher-subject-delete'),
+
+    # --- TEACHER PAYOUTS ---
+    path('payouts/', TeacherPayoutListCreateView.as_view(), name='teacher-payouts'),
 ]
 
 

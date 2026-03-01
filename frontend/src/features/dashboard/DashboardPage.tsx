@@ -4,7 +4,7 @@ import {
   BookOpen, Clock, Trophy, Target, Video, LogOut, ChevronRight,
   PlayCircle, Calendar, Loader2, Users, DollarSign, Briefcase,
   FileText, CreditCard, PenTool, PlusCircle, Wallet,
-  Settings
+  Settings, Package, Coins
 } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../auth/AuthContext';
@@ -256,6 +256,15 @@ function StudentDashboard({ user, lessons, onLogout }: { user: User, lessons: Le
           </div>
           <div onClick={() => navigate('/student/leaderboard')}>
             <NavItem icon={<Trophy size={20} />} label="Leaderboard" />
+          </div>
+          <div onClick={() => navigate('/student/enrollments')}>
+            <NavItem icon={<BookOpen size={20} />} label="My Courses" />
+          </div>
+          <div onClick={() => navigate('/student/packages')}>
+            <NavItem icon={<Package size={20} />} label="Packages" />
+          </div>
+          <div onClick={() => navigate('/student/coins')}>
+            <NavItem icon={<Coins size={20} />} label="Coins & Rewards" />
           </div>
           <div onClick={() => navigate('/student/profile')}>
             <NavItem icon={<Settings size={20} />} label="Profile" />

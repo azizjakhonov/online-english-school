@@ -73,3 +73,62 @@ class Payment(models.Model):
             f"Payment #{self.id} – {student_name} – "
             f"{self.credits_amount} credits – {self.amount_uzs} UZS – {self.status}"
         )
+
+
+# --- PACKAGE / SUBSCRIPTION SYSTEM ---
+class Package(models.Model):
+    """
+    A purchasable bundle of lessons offered to students.
+    """
+    title         = models.CharField(max_length=200)
+    lessons_count = models.PositiveIntegerField(help_text='Number of lessons included in this package')
+    price         = models.DecimalField(max_digits=14, decimal_places=2)
+    currency      = models.CharField(max_length=3, default='UZS')
+    validity_days = models.PositiveIntegerField(help_text='Days from purchase until the package expires')
+    is_active     = models.BooleanField(default=True, help_text='Only active packages are shown to students')
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Package'
+        verbose_name_plural = 'Packages'
+        ordering = ['price']
+
+    def __str__(self):
+        return f"{self.title} ({self.lessons_count} lessons – {self.price} {self.currency})"
+
+
+class StudentPackage(models.Model):
+    """
+    Records a student's purchase of a Package.
+    Tracks remaining lessons and expiry.
+    """
+    class Status(models.TextChoices):
+        ACTIVE  = 'ACTIVE',  'Active'
+        EXPIRED = 'EXPIRED', 'Expired'
+        USED    = 'USED',    'Used'
+
+    student           = models.ForeignKey(
+        'accounts.StudentProfile',
+        on_delete=models.CASCADE,
+        related_name='student_packages',
+        db_index=True,
+    )
+    package           = models.ForeignKey(
+        Package,
+        on_delete=models.PROTECT,
+        related_name='student_packages',
+    )
+    remaining_lessons = models.PositiveIntegerField()
+    expires_at        = models.DateTimeField()
+    status            = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.ACTIVE,
+    )
+    created_at        = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Student Package'
+        verbose_name_plural = 'Student Packages'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.student} | {self.package.title} | {self.remaining_lessons} left [{self.status}]"

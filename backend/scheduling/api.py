@@ -618,3 +618,45 @@ class LessonRatingCreateView(views.APIView):
             'rating':    rating_obj.rating,
             'comment':   rating_obj.comment,
         }, status=status.HTTP_201_CREATED)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LESSON RESCHEDULE HISTORY  (GET /api/lessons/<pk>/reschedule-history/)
+# ─────────────────────────────────────────────────────────────────────────────
+from .models import LessonRescheduleHistory
+
+
+class LessonRescheduleHistoryView(APIView):
+    """
+    GET /api/lessons/<pk>/reschedule-history/
+    Returns the reschedule history for a lesson.
+    Accessible by the lesson's student or teacher.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        lesson = get_object_or_404(Lesson, pk=pk)
+
+        # Only the lesson's participants may view reschedule history
+        if request.user not in (lesson.student, lesson.teacher) and not request.user.is_staff:
+            return Response(
+                {'error': 'You do not have access to this lesson history.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        history = (
+            LessonRescheduleHistory.objects
+            .filter(lesson=lesson)
+            .select_related('changed_by')
+            .order_by('-changed_at')
+        )
+        return Response([
+            {
+                'id':               h.id,
+                'old_scheduled_at': h.old_scheduled_at.isoformat(),
+                'new_scheduled_at': h.new_scheduled_at.isoformat(),
+                'changed_by':       h.changed_by.full_name if h.changed_by else None,
+                'changed_at':       h.changed_at.isoformat(),
+            }
+            for h in history
+        ])

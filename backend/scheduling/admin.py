@@ -9,7 +9,7 @@ from django.utils.html import format_html
 from unfold.admin import ModelAdmin, TabularInline, StackedInline
 from unfold.decorators import display
 
-from .models import Lesson, Availability
+from .models import Lesson, Availability, LessonRescheduleHistory
 
 # Cross-app imports — concrete at module load time so system check is happy
 from progress.models import LessonProgress
@@ -184,3 +184,25 @@ class AvailabilityAdmin(ModelAdmin):
         return obj.get_day_of_week_display()
     get_day.short_description = 'Day'
     get_day.admin_order_field = 'day_of_week'
+
+
+# ════════════════════════════════════════════════════════════════════
+#  LESSON RESCHEDULE HISTORY ADMIN
+# ════════════════════════════════════════════════════════════════════
+@admin.register(LessonRescheduleHistory)
+class LessonRescheduleHistoryAdmin(ModelAdmin):
+    list_display  = ('lesson', 'old_scheduled_at', 'new_scheduled_at', 'changed_by', 'changed_at')
+    list_filter   = ('changed_at',)
+    search_fields = (
+        'lesson__teacher__full_name', 'lesson__student__full_name',
+        'changed_by__full_name', 'changed_by__phone_number',
+    )
+    ordering      = ('-changed_at',)
+    readonly_fields = ('changed_at',)
+
+    def has_add_permission(self, request):
+        return False   # Reschedule history is created programmatically, never manually
+    def has_change_permission(self, request, obj=None):
+        return False   # Immutable audit log
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser

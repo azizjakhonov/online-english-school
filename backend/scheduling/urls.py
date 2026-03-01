@@ -12,6 +12,7 @@ from .api import (
     TeacherLessonHistoryUpdateView,
     TeacherWrapUpView,
     LessonRatingCreateView,
+    LessonRescheduleHistoryView,
 )
 from . import views
 # Create a router and register our viewsets with it.
@@ -44,4 +45,7 @@ urlpatterns = [
 
     # --- Lesson Rating (student post-lesson) ---
     path('lessons/<int:pk>/rate/', LessonRatingCreateView.as_view(), name='lesson-rate'),
+
+    # --- Reschedule History ---
+    path('lessons/<int:pk>/reschedule-history/', LessonRescheduleHistoryView.as_view(), name='lesson-reschedule-history'),
 ]

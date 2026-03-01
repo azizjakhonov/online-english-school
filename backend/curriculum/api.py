@@ -612,3 +612,98 @@ class VideoAssetViewSet(viewsets.ModelViewSet):
         response['X-Content-Type-Options'] = 'nosniff'
         response['Content-Disposition'] = f'inline; filename="{filename}"'
         return self._with_download_cors(request, response)
+
+
+# ============================================================================
+# ENROLLMENT SYSTEM
+# ============================================================================
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from .models import Enrollment, Course
+
+
+class EnrollmentListCreateView(APIView):
+    """
+    GET  /api/curriculum/enrollments/   — student's enrollments
+    POST /api/curriculum/enrollments/   — enroll in a course { "course_id": <id> }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _get_student(self, user):
+        if not hasattr(user, 'student_profile'):
+            return None, Response({'error': 'Only students can access enrollments.'}, status=403)
+        return user.student_profile, None
+
+    def get(self, request):
+        profile, err = self._get_student(request.user)
+        if err:
+            return err
+        enrollments = (
+            Enrollment.objects
+            .filter(student=profile)
+            .select_related('course')
+            .order_by('-created_at')
+        )
+        return Response([
+            {
+                'id':           e.id,
+                'course_id':    e.course.id,
+                'course_title': e.course.title,
+                'status':       e.status,
+                'status_label': e.get_status_display(),
+                'started_at':   e.started_at.isoformat() if e.started_at else None,
+                'completed_at': e.completed_at.isoformat() if e.completed_at else None,
+                'created_at':   e.created_at.isoformat(),
+            }
+            for e in enrollments
+        ])
+
+    def post(self, request):
+        profile, err = self._get_student(request.user)
+        if err:
+            return err
+
+        course_id = request.data.get('course_id')
+        course = get_object_or_404(Course, pk=course_id)
+
+        enrollment, created = Enrollment.objects.get_or_create(
+            student=profile,
+            course=course,
+            defaults={'status': Enrollment.Status.ACTIVE},
+        )
+        return Response(
+            {
+                'id':           enrollment.id,
+                'course_id':    enrollment.course.id,
+                'course_title': enrollment.course.title,
+                'status':       enrollment.status,
+                'started_at':   enrollment.started_at.isoformat() if enrollment.started_at else None,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class EnrollmentUpdateView(APIView):
+    """
+    PATCH /api/curriculum/enrollments/<id>/   — update status { "status": "COMPLETED"|"DROPPED" }
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        if not hasattr(request.user, 'student_profile'):
+            return Response({'error': 'Only students can update enrollments.'}, status=403)
+        profile = request.user.student_profile
+        enrollment = get_object_or_404(Enrollment, pk=pk, student=profile)
+
+        new_status = request.data.get('status')
+        allowed = [Enrollment.Status.COMPLETED, Enrollment.Status.DROPPED]
+        if new_status not in [s.value for s in allowed]:
+            return Response({'error': f'Status must be one of: {[s.value for s in allowed]}'}, status=400)
+
+        enrollment.status = new_status
+        if new_status == Enrollment.Status.COMPLETED:
+            from django.utils import timezone
+            enrollment.completed_at = timezone.now()
+        enrollment.save()
+        return Response({'id': enrollment.id, 'status': enrollment.status})

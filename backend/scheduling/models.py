@@ -157,6 +157,40 @@ class LessonWrapUp(models.Model):
         return f'WrapUp #{self.pk} for Lesson #{self.lesson_id}'
 
 
+# --- LESSON RESCHEDULE HISTORY ---
+class LessonRescheduleHistory(models.Model):
+    """
+    Immutable audit log of every reschedule action on a Lesson.
+    Created manually (via service or admin) whenever a lesson's time changes.
+    """
+    lesson           = models.ForeignKey(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name='reschedule_history',
+        db_index=True,
+    )
+    old_scheduled_at = models.DateTimeField()
+    new_scheduled_at = models.DateTimeField()
+    changed_by       = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='reschedule_changes',
+    )
+    changed_at       = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-changed_at']
+        verbose_name = 'Lesson Reschedule History'
+        verbose_name_plural = 'Lesson Reschedule Histories'
+
+    def __str__(self):
+        return (
+            f"Reschedule #{self.pk}: Lesson #{self.lesson_id} "
+            f"{self.old_scheduled_at:%Y-%m-%d %H:%M} → {self.new_scheduled_at:%Y-%m-%d %H:%M}"
+        )
+
+
 class LessonRating(models.Model):
     """
     Post-lesson rating submitted by the student. OneToOne with Lesson.

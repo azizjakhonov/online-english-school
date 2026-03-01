@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Course, Unit, Lesson, LessonActivity, PdfAsset, AudioAsset, VideoAsset
+from .models import Course, Unit, Lesson, LessonActivity, PdfAsset, AudioAsset, VideoAsset, Enrollment
 
 @admin.register(PdfAsset)
 class PdfAssetAdmin(admin.ModelAdmin):
@@ -37,3 +37,15 @@ class LessonAdmin(admin.ModelAdmin):
 class LessonActivityAdmin(admin.ModelAdmin):
     list_display = ('title', 'activity_type', 'lesson', 'order')
     list_filter = ('activity_type', 'lesson__unit__course')
+
+
+# ════════════════════════════════════════════════════════════════════
+#  ENROLLMENT ADMIN
+# ════════════════════════════════════════════════════════════════════
+@admin.register(Enrollment)
+class EnrollmentAdmin(admin.ModelAdmin):
+    list_display  = ('student', 'course', 'status', 'started_at', 'completed_at')
+    list_filter   = ('status', 'course')
+    search_fields = ('student__user__phone_number', 'student__user__full_name', 'course__title')
+    ordering      = ('-created_at',)
+    readonly_fields = ('started_at', 'created_at', 'updated_at')

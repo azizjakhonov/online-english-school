@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/payments/', include('payments.urls')),
     path('api/banners/', include('banners.urls')),
     path('api/marketing/', include('marketing.urls')),
+    path('api/gamification/', include('gamification.urls')),
 
 
     # JWT

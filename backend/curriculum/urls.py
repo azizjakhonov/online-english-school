@@ -8,6 +8,8 @@ from .api import (
     PdfAssetViewSet,
     AudioAssetViewSet,
     VideoAssetViewSet,
+    EnrollmentListCreateView,
+    EnrollmentUpdateView,
 )
 
 router = DefaultRouter()
@@ -24,4 +26,6 @@ router.register(r'videos',     VideoAssetViewSet,     # /api/curriculum/videos/
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('enrollments/',          EnrollmentListCreateView.as_view(), name='enrollment-list'),
+    path('enrollments/<int:pk>/', EnrollmentUpdateView.as_view(),    name='enrollment-update'),
 ]

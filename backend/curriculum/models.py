@@ -122,3 +122,44 @@ class LessonActivity(models.Model):
 
     def __str__(self):
         return f"{self.activity_type.title()}: {self.title}"
+
+
+# --- ENROLLMENT SYSTEM ---
+class Enrollment(models.Model):
+    """
+    Tracks which students are enrolled in which courses.
+    One enrollment record per (student, course) pair.
+    """
+    class Status(models.TextChoices):
+        ACTIVE    = 'ACTIVE',    'Active'
+        COMPLETED = 'COMPLETED', 'Completed'
+        DROPPED   = 'DROPPED',   'Dropped'
+
+    student      = models.ForeignKey(
+        'accounts.StudentProfile',
+        on_delete=models.CASCADE,
+        related_name='enrollments',
+        db_index=True,
+    )
+    course       = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='enrollments',
+        db_index=True,
+    )
+    status       = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.ACTIVE,
+    )
+    started_at   = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('student', 'course')]
+        verbose_name = 'Enrollment'
+        verbose_name_plural = 'Enrollments'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Enrollment: {self.student} → {self.course} [{self.status}]"

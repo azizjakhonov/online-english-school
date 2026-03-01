@@ -10,7 +10,7 @@ from django.utils.html import format_html
 from unfold.admin import ModelAdmin
 from unfold.decorators import display
 
-from .models import Payment
+from .models import Payment, Package, StudentPackage
 
 
 def _uzs(value):
@@ -106,3 +106,24 @@ class PaymentAdmin(ModelAdmin):
                 p.created_at.strftime('%Y-%m-%d %H:%M'),
             ])
         return response
+
+
+# ════════════════════════════════════════════════════════════════════
+#  PACKAGE / SUBSCRIPTION ADMIN
+# ════════════════════════════════════════════════════════════════════
+@admin.register(Package)
+class PackageAdmin(ModelAdmin):
+    list_display  = ('title', 'lessons_count', 'price', 'currency', 'validity_days', 'is_active', 'created_at')
+    list_filter   = ('is_active', 'currency')
+    search_fields = ('title',)
+    ordering      = ('price',)
+
+
+@admin.register(StudentPackage)
+class StudentPackageAdmin(ModelAdmin):
+    list_display  = ('student', 'package', 'remaining_lessons', 'expires_at', 'status', 'created_at')
+    list_filter   = ('status', 'package')
+    search_fields = ('student__user__phone_number', 'student__user__full_name', 'package__title')
+    ordering      = ('-created_at',)
+    readonly_fields = ('created_at',)
+

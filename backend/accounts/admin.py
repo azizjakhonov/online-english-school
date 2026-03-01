@@ -15,10 +15,11 @@ from unfold.admin import ModelAdmin, StackedInline, TabularInline
 from unfold.decorators import display
 
 from .models import (
-    User, PhoneOTP,
+    User, PhoneOTP, UserIdentity,
     TeacherProfile, StudentProfile,
     AdminNote, CreditTransaction, EarningsEvent,
     ActivityEvent,
+    Subject, TeacherSubject, TeacherPayout,
 )
 from scheduling.models import Lesson
 from payments.models import Payment
@@ -70,6 +71,19 @@ class CreditTransactionInline(TabularInline):
 # ════════════════════════════════════════════════════════════════════
 #  INLINES on User  (FK → User)
 # ════════════════════════════════════════════════════════════════════
+
+class UserIdentityInline(TabularInline):
+    model = UserIdentity
+    fk_name = 'user'          # UserIdentity.user → User ✓
+    extra = 0
+    can_delete = True
+    verbose_name_plural = '🔗 Social Identities'
+    fields = ('provider', 'provider_id', 'email', 'username', 'is_active', 'connected_at')
+    readonly_fields = ('provider', 'provider_id', 'email', 'username', 'connected_at')
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
 
 class UserPaymentInline(TabularInline):
     model = Payment
@@ -194,7 +208,7 @@ class CustomUserAdmin(BaseUserAdmin, ModelAdmin):
 
     fieldsets = (
         (None,            {'fields': ('phone_number', 'password')}),
-        ('Personal Info', {'fields': ('full_name', 'email', 'avatar_preview', 'profile_picture', 'role')}),
+        ('Personal Info', {'fields': ('full_name', 'email', 'timezone', 'avatar_preview', 'profile_picture', 'role')}),
         ('Permissions',   {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Dates',         {'fields': ('last_login', 'date_joined')}),
     )
@@ -205,7 +219,7 @@ class CustomUserAdmin(BaseUserAdmin, ModelAdmin):
         }),
     )
     # Payments + lessons are here because their FKs point to User
-    inlines = [UserPaymentInline, StudentLessonInline, TeacherLessonInline]
+    inlines = [UserIdentityInline, UserPaymentInline, StudentLessonInline, TeacherLessonInline]
 
     @display(description='Role', label=True)
     def role_badge(self, obj):
@@ -244,10 +258,10 @@ class StudentProfileAdmin(ModelAdmin):
         ('Identity', {'fields': ('user', 'avatar_preview', 'level', 'goals')}),
         ('🎯 CRM',   {'fields': ('crm_status', 'tags', 'churn_reason')}),
         ('Credits (read-only — use list actions to change)', {
-            'fields': ('lesson_credits',),
+            'fields': ('lesson_credits', 'credits_reserved'),
         }),
     )
-    readonly_fields = ('lesson_credits', 'avatar_preview')
+    readonly_fields = ('lesson_credits', 'credits_reserved', 'avatar_preview')
     # Notes + credit ledger FK → StudentProfile → work on this page ✓
     inlines = [AdminNoteInline, CreditTransactionInline]
 
@@ -347,17 +361,17 @@ class StudentProfileAdmin(ModelAdmin):
 @admin.register(TeacherProfile)
 class TeacherProfileAdmin(ModelAdmin):
     list_display  = (
-        'avatar_preview', 'get_name', 'headline', 'rating_badge',
+        'avatar_preview', 'get_name', 'status', 'headline', 'rating_badge',
         'rate_display', 'payout_day', 'lessons_taught', 'is_accepting_students',
     )
-    list_filter   = ('is_accepting_students',)
+    list_filter   = ('status', 'is_accepting_students',)
     search_fields = ('user__full_name', 'user__phone_number', 'headline', 'subjects')
     autocomplete_fields = ['user']
     readonly_fields = ('avatar_preview',)
 
     fieldsets = (
-        (None, {'fields': ('user', 'avatar_preview', 'headline', 'bio', 'subjects', 'languages', 'youtube_intro_url')}),
-        ('Rates & Availability', {'fields': ('hourly_rate', 'is_accepting_students', 'rating', 'lessons_taught')}),
+        (None, {'fields': ('user', 'avatar_preview', 'status', 'headline', 'bio', 'subjects', 'languages', 'language_certificates', 'youtube_intro_url')}),
+        ('Rates & Availability', {'fields': ('is_accepting_students', 'rating', 'lessons_taught')}),
         ('💰 Earnings Config', {
             'fields': ('rate_per_lesson_uzs', 'payout_day'),
             'description': 'UZS salary per lesson and monthly payout day (1–28).',
@@ -698,4 +712,44 @@ def _custom_get_urls(self):
 
 
 admin.AdminSite.get_urls = _custom_get_urls
+
+
+# ════════════════════════════════════════════════════════════════════
+#  SUBJECT NORMALIZATION ADMIN
+# ════════════════════════════════════════════════════════════════════
+@admin.register(Subject)
+class SubjectAdmin(ModelAdmin):
+    list_display  = ('name', 'created_at')
+    search_fields = ('name',)
+    ordering      = ('name',)
+
+
+@admin.register(TeacherSubject)
+class TeacherSubjectAdmin(ModelAdmin):
+    list_display  = ('teacher', 'subject')
+    list_filter   = ('subject',)
+    search_fields = (
+        'teacher__user__full_name', 'teacher__user__phone_number',
+        'subject__name',
+    )
+
+
+# ════════════════════════════════════════════════════════════════════
+#  TEACHER PAYOUT ADMIN
+# ════════════════════════════════════════════════════════════════════
+@admin.register(TeacherPayout)
+class TeacherPayoutAdmin(ModelAdmin):
+    list_display  = ('teacher', 'amount', 'currency', 'status_badge', 'requested_at', 'processed_at')
+    list_filter   = ('status', 'currency', 'requested_at')
+    search_fields = ('teacher__user__full_name', 'teacher__user__phone_number', 'notes')
+    ordering      = ('-requested_at',)
+    readonly_fields = ('requested_at',)
+
+    @display(description='Status', label=True)
+    def status_badge(self, obj):
+        color_map = {
+            'REQUESTED': 'orange', 'APPROVED': 'blue',
+            'PAID': 'green', 'REJECTED': 'red',
+        }
+        return obj.get_status_display(), color_map.get(obj.status, 'gray')
 
