@@ -1,5 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import AnnouncementBar from '../components/marketing/AnnouncementBar'
+import AnnouncementBannerBar from '../components/marketing/AnnouncementBannerBar'
+import ModalBanner from '../components/marketing/ModalBanner'
 
 /**
  * AppLayout — top-level wrapper for all authenticated app pages.
@@ -10,6 +12,8 @@ export default function AppLayout() {
   return (
     <>
       <AnnouncementBar />
+      <AnnouncementBannerBar />
+      <ModalBanner />
       <Outlet />
     </>
   )

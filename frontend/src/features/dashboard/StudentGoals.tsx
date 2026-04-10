@@ -5,7 +5,10 @@ import {
 } from 'lucide-react';
 import api from '../../lib/api';
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentGoals() {
+  usePageTitle('My Goals');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

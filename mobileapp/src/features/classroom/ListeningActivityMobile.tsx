@@ -11,7 +11,7 @@ import {
 import { Audio, AVPlaybackStatus, AVPlaybackStatusSuccess } from 'expo-av';
 import { Play, Headphones } from 'lucide-react-native';
 import { Colors, Shadows } from '../../theme';
-import * as SecureStore from 'expo-secure-store';
+import storage from '../../lib/storage';
 import { BRIDGE_BASE_URL } from '../../api/client';
 
 interface ListeningProps {
@@ -37,7 +37,7 @@ export default function ListeningActivityMobile({ content, onAction, gameState, 
     const isSyncingRef = useRef(false);
 
     useEffect(() => {
-        SecureStore.getItemAsync('access_token').then(setToken);
+        storage.getItemAsync('access_token').then(setToken);
     }, []);
 
     const audioUrl = useMemo(() => {

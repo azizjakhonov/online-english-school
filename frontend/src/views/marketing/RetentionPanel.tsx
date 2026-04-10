@@ -70,7 +70,10 @@ function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function RetentionPanel() {
+  usePageTitle('Retention');
   const [acqPeriod, setAcqPeriod] = useState(30)
 
   const { data: ret, isLoading: retLoading } = useQuery<RetentionData>({

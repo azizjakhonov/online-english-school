@@ -7,11 +7,15 @@ interface ApiError {
   response?: { data?: { error?: string } };
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherVerifyOtpPage() {
+  usePageTitle('Verify OTP');
   const navigate = useNavigate();
   const location = useLocation();
   const phone: string = location.state?.phone || '';
   const from: string = location.state?.from || 'login';
+  const socialToken: string | null = location.state?.socialToken || null;
 
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,9 +25,9 @@ export default function TeacherVerifyOtpPage() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="text-center">
-          <p className="text-slate-500 mb-4">No phone number provided.</p>
+          <p className="text-slate-500 mb-4">Telefon raqami kiritilmagan.</p>
           <Link to="/teacher/login" className="text-blue-600 font-bold hover:underline">
-            Back to Login
+            Kirish sahifasiga qaytish
           </Link>
         </div>
       </div>
@@ -35,7 +39,10 @@ export default function TeacherVerifyOtpPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.post('/api/verify-otp/', { phone, code: otp });
+      const payload: Record<string, string> = { phone, code: otp };
+      if (socialToken) payload.social_token = socialToken;
+
+      const res = await api.post('/api/verify-otp/', payload);
       const { access, refresh, is_new_user } = res.data;
       localStorage.setItem('access_token', access);
       localStorage.setItem('refresh_token', refresh);
@@ -43,20 +50,25 @@ export default function TeacherVerifyOtpPage() {
       if (is_new_user) {
         navigate('/teacher/onboarding', { replace: true });
       } else {
-        // Check teacher approval status
-        const meRes = await api.get('/api/me/');
-        const teacherProfile = meRes.data.teacher_profile;
-        const status = teacherProfile?.status;
-        // If status field not present or is 'active', go to dashboard
-        if (!status || status === 'active') {
+        // Teacher approval status check
+        try {
+          const meRes = await api.get('/api/me/');
+          const teacherProfile = meRes.data.teacher_profile;
+          const status = teacherProfile?.status;
+
+          if (!status || status === 'active') {
+            window.location.href = '/dashboard';
+          } else {
+            navigate('/teacher/pending-approval', { replace: true });
+          }
+        } catch (err) {
+          // If fallback to dashboard if /api/me fails but tokens are valid
           window.location.href = '/dashboard';
-        } else {
-          navigate('/teacher/pending-approval', { replace: true });
         }
       }
     } catch (err) {
       const e = err as ApiError;
-      setError(e.response?.data?.error || 'Incorrect code. Please try again.');
+      setError(e.response?.data?.error || "Kod noto'g'ri. Iltimos, qaytadan urinib ko'ring.");
     } finally {
       setLoading(false);
     }
@@ -71,7 +83,7 @@ export default function TeacherVerifyOtpPage() {
           to={backTo}
           className="inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-700 mb-6 transition-colors uppercase tracking-widest"
         >
-          <ArrowLeft size={16} /> Back
+          <ArrowLeft size={16} /> Orqaga
         </Link>
 
         <div className="bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
@@ -79,10 +91,9 @@ export default function TeacherVerifyOtpPage() {
             <MessageSquare size={28} className="text-teal-600" />
           </div>
 
-          <h1 className="text-2xl font-black text-slate-900 mb-1">Enter the Code</h1>
+          <h1 className="text-2xl font-black text-slate-900 mb-1">Kodni kiriting</h1>
           <p className="text-sm text-slate-500 font-medium mb-8">
-            We sent a 5-digit verification code to{' '}
-            <span className="font-bold text-slate-700">{phone}</span>
+            Biz <span className="font-bold text-slate-700">{phone}</span> raqamiga 5 xonali tasdiqlash kodini yubordik.
           </p>
 
           {error && (
@@ -107,7 +118,7 @@ export default function TeacherVerifyOtpPage() {
               disabled={loading || otp.length < 4}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-2xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-100"
             >
-              {loading ? <Loader2 size={20} className="animate-spin" /> : 'Verify Code'}
+              {loading ? <Loader2 size={20} className="animate-spin" /> : 'Tasdiqlash'}
             </button>
 
             <button
@@ -115,7 +126,7 @@ export default function TeacherVerifyOtpPage() {
               onClick={() => navigate(backTo)}
               className="w-full text-xs font-bold text-slate-400 hover:text-slate-700 transition-colors uppercase tracking-widest"
             >
-              Change phone number
+              Telefon raqamini o'zgartirish
             </button>
           </form>
         </div>
@@ -123,3 +134,4 @@ export default function TeacherVerifyOtpPage() {
     </div>
   );
 }
+

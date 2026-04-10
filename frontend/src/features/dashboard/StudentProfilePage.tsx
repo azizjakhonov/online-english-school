@@ -46,7 +46,10 @@ interface ExtendedUser {
     };
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentProfilePage() {
+    usePageTitle('My Profile');
     const navigate = useNavigate();
     const { user, refreshUser } = useAuth();
     const currentUser = user as unknown as ExtendedUser | null;

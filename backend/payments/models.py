@@ -2,6 +2,31 @@ from django.db import models
 from django.conf import settings
 
 
+class CreditPackage(models.Model):
+    """
+    Admin-managed catalogue of credit packages shown to students on the Buy Credits page.
+    Replaces the hardcoded PACKAGES dict in services.py.
+    """
+    name           = models.CharField(max_length=100)
+    credits        = models.PositiveIntegerField(help_text='Lesson credits the student receives')
+    price_uzs      = models.DecimalField(max_digits=14, decimal_places=0, help_text='Price in UZS')
+    is_active      = models.BooleanField(default=True, help_text='Hidden from students when False')
+    is_popular     = models.BooleanField(default=False, help_text='Show "Popular" badge')
+    sort_order     = models.PositiveIntegerField(default=0, help_text='Lower = shown first')
+    features       = models.JSONField(default=list, help_text='List of feature strings shown on card')
+    validity_label = models.CharField(max_length=100, blank=True, help_text='Display text only, e.g. "Valid 90 days"')
+    created_at     = models.DateTimeField(auto_now_add=True)
+    updated_at     = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sort_order', 'price_uzs']
+        verbose_name = 'Credit Package'
+        verbose_name_plural = 'Credit Packages'
+
+    def __str__(self):
+        return f"{self.name} – {self.credits} credits – {int(self.price_uzs):,} UZS"
+
+
 class Payment(models.Model):
     """
     Records every credit purchase made by a student.
@@ -30,6 +55,13 @@ class Payment(models.Model):
         TEST    = 'test',    'Test (Demo)'
 
     # --- Core fields ---
+    package        = models.ForeignKey(
+        CreditPackage,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='payments',
+        help_text='Credit package purchased (null for legacy/manual payments)',
+    )
     student        = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

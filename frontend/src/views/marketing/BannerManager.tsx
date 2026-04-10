@@ -97,11 +97,13 @@ interface SortableBannerRowProps {
   onEdit: (b: MarketingBanner) => void
   onDelete: (id: number) => void
   onToggle: (id: number, active: boolean) => void
+  draggable?: boolean
 }
 
-function SortableBannerRow({ banner, onEdit, onDelete, onToggle }: SortableBannerRowProps) {
+function SortableBannerRow({ banner, onEdit, onDelete, onToggle, draggable = true }: SortableBannerRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: banner.id,
+    disabled: !draggable,
   })
 
   const style = {
@@ -118,11 +120,15 @@ function SortableBannerRow({ banner, onEdit, onDelete, onToggle }: SortableBanne
       style={style}
       className="bg-white rounded-lg border border-stone-200 p-4 flex items-center gap-4"
     >
-      {/* Drag handle */}
+      {/* Drag handle — disabled when a filter is active */}
       <button
-        {...attributes}
-        {...listeners}
-        className="text-stone-300 hover:text-stone-500 cursor-grab active:cursor-grabbing shrink-0 touch-none"
+        {...(draggable ? attributes : {})}
+        {...(draggable ? listeners : {})}
+        disabled={!draggable}
+        className={`text-stone-300 shrink-0 touch-none
+          ${draggable
+            ? 'hover:text-stone-500 cursor-grab active:cursor-grabbing'
+            : 'opacity-30 cursor-not-allowed'}`}
         aria-label="Drag to reorder"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -229,9 +235,10 @@ interface BannerModalProps {
   onSave: (data: BannerFormData) => Promise<void>
   onClose: () => void
   saving: boolean
+  saveError: string | null
 }
 
-function BannerModal({ initial, onSave, onClose, saving }: BannerModalProps) {
+function BannerModal({ initial, onSave, onClose, saving, saveError }: BannerModalProps) {
   const [form, setForm] = useState<BannerFormData>(initial)
 
   const set = useCallback(<K extends keyof BannerFormData>(key: K, val: BannerFormData[K]) => {
@@ -253,6 +260,13 @@ function BannerModal({ initial, onSave, onClose, saving }: BannerModalProps) {
         </div>
 
         <div className="p-6 space-y-4">
+          {/* Save error */}
+          {saveError && (
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {saveError}
+            </div>
+          )}
+
           {/* Preview */}
           <div>
             <p className="text-xs font-medium text-stone-500 mb-2 uppercase tracking-wide">Preview</p>
@@ -446,8 +460,12 @@ function BannerModal({ initial, onSave, onClose, saving }: BannerModalProps) {
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function BannerManager() {
+  usePageTitle('Banners');
   const [banners, setBanners] = useState<MarketingBanner[]>([])
+  const [archivedBanners, setArchivedBanners] = useState<MarketingBanner[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [modal, setModal] = useState<{ open: boolean; editing: MarketingBanner | null }>({
@@ -455,7 +473,9 @@ export default function BannerManager() {
     editing: null,
   })
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [filterAudience, setFilterAudience] = useState<string>('all')
+  const [view, setView] = useState<'active' | 'history'>('active')
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -466,8 +486,14 @@ export default function BannerManager() {
   const fetchBanners = useCallback(async () => {
     try {
       setError(null)
-      const res = await api.get('/api/marketing/banners/')
-      setBanners(res.data.results ?? res.data)
+      const [activeRes, archivedRes] = await Promise.all([
+        api.get('/api/marketing/banners/'),
+        api.get('/api/marketing/banners/?archived=true'),
+      ])
+      const active: MarketingBanner[] = (activeRes.data.results ?? activeRes.data).filter((b: MarketingBanner) => b.id && b.id > 0)
+      const archived: MarketingBanner[] = (archivedRes.data.results ?? archivedRes.data).filter((b: MarketingBanner) => b.id && b.id > 0)
+      setBanners(active)
+      setArchivedBanners(archived)
     } catch {
       setError('Failed to load banners.')
     } finally {
@@ -490,9 +516,11 @@ export default function BannerManager() {
         const newIdx = prev.findIndex(b => b.id === over.id)
         const next = arrayMove(prev, oldIdx, newIdx)
 
-        // Persist new order via individual PATCHes
+        // Persist new order via individual PATCHes — skip any banner without a valid server ID
         next.forEach((b, i) => {
-          api.patch(`/api/marketing/banners/${b.id}/`, { order: i }).catch(() => {})
+          if (b.id && b.id > 0) {
+            api.patch(`/api/marketing/banners/${b.id}/`, { order: i }).catch(() => { })
+          }
         })
 
         return next
@@ -501,8 +529,10 @@ export default function BannerManager() {
     [],
   )
 
+
   // ── Toggle active ──────────────────────────────────────────────────────────
   const handleToggle = useCallback(async (id: number, active: boolean) => {
+    if (!id || id <= 0) return
     setBanners(prev => prev.map(b => b.id === id ? { ...b, is_active: active } : b))
     try {
       await api.patch(`/api/marketing/banners/${id}/`, { is_active: active })
@@ -514,6 +544,7 @@ export default function BannerManager() {
 
   // ── Delete ─────────────────────────────────────────────────────────────────
   const handleDelete = useCallback(async (id: number) => {
+    if (!id || id <= 0) return
     if (!window.confirm('Delete this banner?')) return
     setBanners(prev => prev.filter(b => b.id !== id))
     try {
@@ -531,6 +562,7 @@ export default function BannerManager() {
   // ── Save (create or update) ────────────────────────────────────────────────
   const handleSave = useCallback(async (data: BannerFormData) => {
     setSaving(true)
+    setSaveError(null)
     try {
       const payload = {
         ...data,
@@ -546,7 +578,7 @@ export default function BannerManager() {
       setModal({ open: false, editing: null })
       await fetchBanners()
     } catch {
-      // stay open on error
+      setSaveError('Failed to save banner. Please check your input and try again.')
     } finally {
       setSaving(false)
     }
@@ -555,24 +587,24 @@ export default function BannerManager() {
   // ── Build form initial from editing banner ─────────────────────────────────
   const modalInitial: BannerFormData = modal.editing
     ? {
-        title: modal.editing.title,
-        subtitle: modal.editing.subtitle,
-        image_url: modal.editing.image_url,
-        cta_text: modal.editing.cta_text,
-        cta_url: modal.editing.cta_url,
-        cta_open_new_tab: modal.editing.cta_open_new_tab,
-        background_color: modal.editing.background_color,
-        text_color: modal.editing.text_color,
-        target_audience: modal.editing.target_audience,
-        banner_type: modal.editing.banner_type,
-        is_active: modal.editing.is_active,
-        starts_at: modal.editing.starts_at
-          ? modal.editing.starts_at.substring(0, 16)
-          : '',
-        ends_at: modal.editing.ends_at
-          ? modal.editing.ends_at.substring(0, 16)
-          : '',
-      }
+      title: modal.editing.title,
+      subtitle: modal.editing.subtitle,
+      image_url: modal.editing.image_url,
+      cta_text: modal.editing.cta_text,
+      cta_url: modal.editing.cta_url,
+      cta_open_new_tab: modal.editing.cta_open_new_tab,
+      background_color: modal.editing.background_color,
+      text_color: modal.editing.text_color,
+      target_audience: modal.editing.target_audience,
+      banner_type: modal.editing.banner_type,
+      is_active: modal.editing.is_active,
+      starts_at: modal.editing.starts_at
+        ? modal.editing.starts_at.substring(0, 16)
+        : '',
+      ends_at: modal.editing.ends_at
+        ? modal.editing.ends_at.substring(0, 16)
+        : '',
+    }
     : EMPTY_FORM
 
   const filtered = filterAudience === 'all'
@@ -597,81 +629,143 @@ export default function BannerManager() {
             {liveCount} live · {totalImpressions.toLocaleString()} impressions · {avgCtr}% avg CTR
           </p>
         </div>
+        {view === 'active' && (
+          <button
+            onClick={() => setModal({ open: true, editing: null })}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+          >
+            + New Banner
+          </button>
+        )}
+      </div>
+
+      {/* Top-level view tabs: Active / History */}
+      <div className="flex gap-4 border-b border-stone-200">
         <button
-          onClick={() => setModal({ open: true, editing: null })}
-          className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+          onClick={() => setView('active')}
+          className={`pb-2 text-sm font-medium border-b-2 transition-colors ${view === 'active' ? 'border-amber-600 text-amber-700' : 'border-transparent text-stone-500 hover:text-stone-700'
+            }`}
         >
-          + New Banner
+          Active Banners
+        </button>
+        <button
+          onClick={() => setView('history')}
+          className={`pb-2 text-sm font-medium border-b-2 transition-colors ${view === 'history' ? 'border-stone-600 text-stone-700' : 'border-transparent text-stone-500 hover:text-stone-700'
+            }`}
+        >
+          History {archivedBanners.length > 0 && <span className="ml-1 bg-stone-100 text-stone-600 text-xs px-1.5 py-0.5 rounded-full">{archivedBanners.length}</span>}
         </button>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-stone-200">
-        {(['all', 'student', 'teacher', 'landing'] as const).map(aud => (
-          <button
-            key={aud}
-            onClick={() => setFilterAudience(aud)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors capitalize
-              ${filterAudience === aud
-                ? 'border-amber-600 text-amber-700'
-                : 'border-transparent text-stone-500 hover:text-stone-700'}`}
-          >
-            {aud === 'all' ? 'All' : aud.charAt(0).toUpperCase() + aud.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {/* Banner list */}
-      {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="bg-white rounded-lg border border-stone-200 p-4 h-16 animate-pulse" />
-          ))}
+      {/* History view */}
+      {view === 'history' && (
+        <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
+          {archivedBanners.length === 0 ? (
+            <div className="text-center py-12 text-stone-400 text-sm">No archived banners yet.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-stone-200 bg-stone-50 text-left">
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Title</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Type</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Audience</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Impressions</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Clicks</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">CTR</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archivedBanners.map(b => (
+                  <tr key={b.id} className="border-b border-stone-100 hover:bg-stone-50">
+                    <td className="px-4 py-3 font-medium text-stone-700 truncate max-w-[200px]">{b.title}</td>
+                    <td className="px-4 py-3 text-stone-500 capitalize">{b.banner_type}</td>
+                    <td className="px-4 py-3 text-stone-500 capitalize">{b.target_audience}</td>
+                    <td className="px-4 py-3 text-stone-600">{b.impressions.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-stone-600">{b.clicks.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-stone-600">{b.ctr}%</td>
+                    <td className="px-4 py-3 text-stone-400 text-xs">{new Date(b.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
-      ) : error ? (
-        <div className="bg-red-50 text-red-600 text-sm rounded-lg p-4">{error}</div>
-      ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-lg border border-stone-200 p-12 text-center text-stone-400 text-sm">
-          No banners yet.{' '}
-          <button
-            onClick={() => setModal({ open: true, editing: null })}
-            className="text-amber-600 hover:underline"
-          >
-            Create one
-          </button>
-        </div>
-      ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={filtered.map(b => b.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            <div className="space-y-2">
-              {filtered.map(banner => (
-                <SortableBannerRow
-                  key={banner.id}
-                  banner={banner}
-                  onEdit={handleEdit}
-                  onDelete={handleDelete}
-                  onToggle={handleToggle}
-                />
-              ))}
-            </div>
-          </SortableContext>
-        </DndContext>
       )}
 
-      {/* Legend */}
-      {!loading && !error && filtered.length > 0 && (
-        <p className="text-xs text-stone-400 flex items-center gap-1">
-          <span>↕ Drag rows to reorder</span>
-          <span className="mx-1">·</span>
-          <span>Order is saved immediately</span>
-        </p>
+      {/* Active view */}
+      {view === 'active' && (
+        <>
+          {/* Filter tabs */}
+          <div className="flex gap-1 border-b border-stone-200">
+            {(['all', 'student', 'teacher', 'landing'] as const).map(aud => (
+              <button
+                key={aud}
+                onClick={() => setFilterAudience(aud)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors capitalize
+              ${filterAudience === aud
+                    ? 'border-amber-600 text-amber-700'
+                    : 'border-transparent text-stone-500 hover:text-stone-700'}`}
+              >
+                {aud === 'all' ? 'All' : aud.charAt(0).toUpperCase() + aud.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* Banner list */}
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="bg-white rounded-lg border border-stone-200 p-4 h-16 animate-pulse" />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="bg-red-50 text-red-600 text-sm rounded-lg p-4">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="bg-white rounded-lg border border-stone-200 p-12 text-center text-stone-400 text-sm">
+              No banners yet.{' '}
+              <button
+                onClick={() => setModal({ open: true, editing: null })}
+                className="text-amber-600 hover:underline"
+              >
+                Create one
+              </button>
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={filtered.map(b => b.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-2">
+                  {filtered.map(banner => (
+                    <SortableBannerRow
+                      key={banner.id}
+                      banner={banner}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                      onToggle={handleToggle}
+                      draggable={filterAudience === 'all'}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
+
+          {/* Legend */}
+          {!loading && !error && filtered.length > 0 && (
+            <p className="text-xs text-stone-400">
+              {filterAudience === 'all'
+                ? '↕ Drag rows to reorder · Order is saved immediately'
+                : 'Switch to "All" view to drag-reorder banners'}
+            </p>
+          )}
+        </>
       )}
 
       {/* Modal */}
@@ -679,8 +773,9 @@ export default function BannerManager() {
         <BannerModal
           initial={modalInitial}
           onSave={handleSave}
-          onClose={() => setModal({ open: false, editing: null })}
+          onClose={() => { setModal({ open: false, editing: null }); setSaveError(null) }}
           saving={saving}
+          saveError={saveError}
         />
       )}
     </div>

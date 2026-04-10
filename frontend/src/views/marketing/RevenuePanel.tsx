@@ -10,6 +10,8 @@ import api from '../../lib/api'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface DailyRevenue { date: string; revenue: number; payments: number }
+interface PackageBreakdown { package_id: number; package_name: string; credits: number; sales: number; revenue: number }
+interface ProviderBreakdown { provider: string; sales: number; revenue: number }
 interface RevenueData {
   period_days: number
   total_revenue: number
@@ -17,6 +19,8 @@ interface RevenueData {
   avg_order_value: number
   currency: string
   daily_revenue: DailyRevenue[]
+  by_package: PackageBreakdown[]
+  by_provider: ProviderBreakdown[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -50,7 +54,10 @@ function RevenueTooltip({ active, payload, label }: any) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function RevenuePanel() {
+  usePageTitle('Revenue');
   const [period, setPeriod] = useState(90)
   const [view, setView] = useState<'revenue' | 'payments'>('revenue')
 
@@ -197,6 +204,74 @@ export default function RevenuePanel() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Per-package + per-provider breakdowns */}
+      {!isLoading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+          {/* By Package */}
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-stone-100">
+              <h2 className="text-sm font-semibold text-stone-700">By Package</h2>
+            </div>
+            {(data?.by_package ?? []).length === 0 ? (
+              <p className="px-5 py-6 text-sm text-stone-400">No package data for this period.</p>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-stone-50 border-b border-stone-100">
+                    <th className="px-5 py-2.5 text-left text-xs font-semibold text-stone-500 uppercase tracking-wide">Package</th>
+                    <th className="px-5 py-2.5 text-right text-xs font-semibold text-stone-500 uppercase tracking-wide">Sales</th>
+                    <th className="px-5 py-2.5 text-right text-xs font-semibold text-stone-500 uppercase tracking-wide">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.by_package ?? []).map(row => (
+                    <tr key={row.package_id} className="border-b border-stone-50 hover:bg-stone-50 transition-colors">
+                      <td className="px-5 py-2.5 text-sm text-stone-700 font-medium">
+                        {row.package_name}
+                        <span className="text-xs text-stone-400 ml-1">({row.credits} cr)</span>
+                      </td>
+                      <td className="px-5 py-2.5 text-sm text-right text-stone-600">{row.sales}</td>
+                      <td className="px-5 py-2.5 text-sm text-right font-medium text-stone-800">{fmtUZS(row.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* By Provider */}
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-stone-100">
+              <h2 className="text-sm font-semibold text-stone-700">By Payment Provider</h2>
+            </div>
+            {(data?.by_provider ?? []).length === 0 ? (
+              <p className="px-5 py-6 text-sm text-stone-400">No provider data for this period.</p>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-stone-50 border-b border-stone-100">
+                    <th className="px-5 py-2.5 text-left text-xs font-semibold text-stone-500 uppercase tracking-wide">Provider</th>
+                    <th className="px-5 py-2.5 text-right text-xs font-semibold text-stone-500 uppercase tracking-wide">Sales</th>
+                    <th className="px-5 py-2.5 text-right text-xs font-semibold text-stone-500 uppercase tracking-wide">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.by_provider ?? []).map(row => (
+                    <tr key={row.provider} className="border-b border-stone-50 hover:bg-stone-50 transition-colors">
+                      <td className="px-5 py-2.5 text-sm text-stone-700 font-medium capitalize">{row.provider}</td>
+                      <td className="px-5 py-2.5 text-sm text-right text-stone-600">{row.sales}</td>
+                      <td className="px-5 py-2.5 text-sm text-right font-medium text-stone-800">{fmtUZS(row.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
         </div>
       )}
     </div>

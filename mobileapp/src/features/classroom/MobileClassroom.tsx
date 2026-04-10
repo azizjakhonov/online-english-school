@@ -26,9 +26,9 @@ import {
     PenTool,
     Clock,
 } from 'lucide-react-native';
-import * as SecureStore from 'expo-secure-store';
+import storage from '../../lib/storage';
 import { Colors, Shadows, Spacing } from '../../theme';
-import client, { BRIDGE_BASE_URL } from '../../api/client';
+import client from '../../api/client';
 
 // Activities
 import MobileWhiteboard from './MobileWhiteboard';
@@ -38,7 +38,7 @@ import GapFillMobile from './GapFillMobile';
 import PdfActivityMobile from './PdfActivityMobile';
 import VideoActivityMobile from './VideoActivityMobile';
 import ListeningActivityMobile from './ListeningActivityMobile';
-import AgoraVideoRoom from './AgoraVideoRoom';
+import LiveKitVideoRoom from './LiveKitVideoRoom';
 
 
 
@@ -96,8 +96,10 @@ export default function MobileClassroom({ navigation, route }: ClassroomProps) {
                 setLessonData(entryRes.data);
 
                 // 2. Setup WebSocket
-                const token = await SecureStore.getItemAsync('access_token');
-                const wsBase = BRIDGE_BASE_URL.replace('http://', 'ws://').replace('https://', 'wss://');
+                const token = await storage.getItemAsync('access_token');
+                const wsBase = (process.env.EXPO_PUBLIC_API_URL ?? 'https://api.allright.uz')
+                    .replace('http://', 'ws://')
+                    .replace('https://', 'wss://');
                 const wsUrl = `${wsBase}/ws/lesson/${sessionId}/?token=${token}`;
 
                 const socket = new WebSocket(wsUrl);
@@ -372,14 +374,12 @@ export default function MobileClassroom({ navigation, route }: ClassroomProps) {
                     activeOpacity={0.9}
                 >
                     {lessonData && (
-                        <AgoraVideoRoom
-                            appId={lessonData.appId}
-                            channelName={lessonData.channel}
+                        <LiveKitVideoRoom
+                            livekitUrl={lessonData.livekitUrl}
                             token={lessonData.token}
-                            uid={lessonData.uid}
+                            roomName={lessonData.channel}
                             micOn={isMicOn}
                             cameraOn={isVideoOn}
-                            activePlayer={activeVideo}
                         />
                     )}
                     <View style={styles.videoLabel}>

@@ -15,7 +15,7 @@ import { Colors, Spacing, Shadows } from '../../theme';
 import { useAuth } from './AuthContext';
 
 export default function OtpScreen({ navigation, route }: any) {
-    const { phone, socialToken } = route.params as { phone: string; socialToken?: string };
+    const { phone } = route.params as { phone: string };
     const { login } = useAuth();
     const [otp, setOtp] = useState(['', '', '', '', '']);
     const [isLoading, setIsLoading] = useState(false);
@@ -49,7 +49,7 @@ export default function OtpScreen({ navigation, route }: any) {
         setIsLoading(true);
         setError('');
         try {
-            const isNewUser = await login(phone, code, socialToken);
+            const isNewUser = await login(phone, code);
             if (isNewUser) {
                 navigation.navigate('Onboarding');
             }

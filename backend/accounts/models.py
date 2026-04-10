@@ -419,6 +419,7 @@ class ActivityEvent(models.Model):
         LESSON_ABSENT      = 'lesson_absent',      'Student Absent'
         TEACHER_PAYOUT     = 'teacher_payout',     'Teacher Payout'
         ADMIN_NOTE_ADDED   = 'admin_note_added',   'Admin Note Added'
+        ADMIN_IMPERSONATION = 'admin_impersonation', 'Admin Impersonation'
 
     event_type        = models.CharField(
         max_length=30, choices=EventType.choices, db_index=True

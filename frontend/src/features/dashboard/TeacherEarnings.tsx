@@ -41,7 +41,10 @@ const EVENT_COLORS: Record<string, { bg: string; text: string; dot: string }> = 
   correction: { bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' },
 };
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherEarnings() {
+  usePageTitle('Earnings');
   const navigate = useNavigate();
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(true);

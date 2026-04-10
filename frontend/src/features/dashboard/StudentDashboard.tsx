@@ -14,6 +14,7 @@ import {
 import api from '../../lib/api';
 import BannerCarousel from './ui/BannerCarousel';
 import { BannerCarousel as MarketingBannerCarousel } from '../../components/marketing/BannerCarousel';
+import { InlineBanner } from '../../components/marketing/InlineBanner';
 import { formatDate, formatMonthShort, formatDayNum, formatTime } from '../../utils/datetime';
 
 
@@ -156,6 +157,7 @@ export default function StudentDashboard({ user: initialUser }: StudentDashboard
         <BannerCarousel placement="student_home_top" />
         {/* MARKETING BANNERS — managed via Marketing Dashboard */}
         <MarketingBannerCarousel audience="student" />
+        <InlineBanner audience="student" />
 
         {/* STATS GRID */}
 

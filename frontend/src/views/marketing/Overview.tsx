@@ -17,7 +17,10 @@ function fmtUZS(v: number) {
   return `${v.toLocaleString()} UZS`
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function MarketingOverview() {
+  usePageTitle('Marketing Overview');
   const [period, setPeriod] = useState(30)
 
   const { data, isLoading } = useQuery({

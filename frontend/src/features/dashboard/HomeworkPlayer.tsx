@@ -21,7 +21,10 @@ interface AssignmentData {
     is_completed: boolean;
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function HomeworkPlayer() {
+    usePageTitle('Homework');
     const { assignmentId } = useParams<{ assignmentId: string }>();
     const navigate = useNavigate();
 

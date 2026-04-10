@@ -57,7 +57,10 @@ interface ApiError {
   };
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherHomework() {
+  usePageTitle('Homework');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<Assignment[]>([]);

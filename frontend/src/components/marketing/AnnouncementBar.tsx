@@ -41,8 +41,8 @@ export default function AnnouncementBar() {
   // Determine audience param from user role
   const audience =
     user?.role === 'student' ? 'student'
-    : user?.role === 'teacher' ? 'teacher'
-    : null
+      : user?.role === 'teacher' ? 'teacher'
+        : null
 
   const { data: all = [] } = useQuery<Announcement[]>({
     queryKey: ['active-announcements', audience],
@@ -51,7 +51,7 @@ export default function AnnouncementBar() {
         .get(`/api/marketing/announcements/active/?audience=${audience}`)
         .then(r => r.data),
     enabled: !!audience,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
   })
 
   // Filter out dismissed entries

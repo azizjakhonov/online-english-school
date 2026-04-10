@@ -8,7 +8,7 @@ import {
 import { Video, ResizeMode, AVPlaybackStatus, AVPlaybackStatusSuccess } from 'expo-av';
 import YoutubePlayer from 'react-native-youtube-iframe';
 import { Shadows } from '../../theme';
-import * as SecureStore from 'expo-secure-store';
+import storage from '../../lib/storage';
 import { BRIDGE_BASE_URL } from '../../api/client';
 
 interface VideoProps {
@@ -45,7 +45,7 @@ export default function VideoActivityMobile({ content, onAction, gameState, vide
     const ytId = content.url ? extractYouTubeId(content.url) : null;
 
     useEffect(() => {
-        SecureStore.getItemAsync('access_token').then(setToken);
+        storage.getItemAsync('access_token').then(setToken);
     }, []);
 
     // Sync Student with Teacher Actions

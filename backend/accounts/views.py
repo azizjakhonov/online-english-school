@@ -7,9 +7,8 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.core import signing
 from django.conf import settings as django_settings
-from .models import PhoneOTP, StudentProfile, User, UserIdentity
+from .models import PhoneOTP, StudentProfile, User
 from .utils import generate_otp
 from .serializers import UserSerializer
 from .services.devsms import DevSmsService
@@ -23,8 +22,10 @@ class SendOTPView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        logger.debug("SendOTPView request.data: %s", request.data)
         phone = request.data.get('phone')
         if not phone:
+            logger.error("SendOTPView: phone missing. request.data=%s", request.data)
             return Response({'error': 'Phone number is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         otp = generate_otp()
@@ -33,6 +34,11 @@ class SendOTPView(APIView):
             phone_number=phone,
             defaults={'otp': otp}
         )
+
+        # In local development, skip SMS and print OTP to the terminal
+        if django_settings.DEBUG:
+            print(f"\n{'='*40}\n📱 OTP for {phone}: {otp}\n{'='*40}\n")
+            return Response({'message': 'OTP sent successfully (dev mode — check terminal)'})
 
         message = f"Allright.uz код подтверждения для регистрации на сайт: {otp}"
         sms_result = DevSmsService().send_sms(phone, message)
@@ -53,7 +59,6 @@ class VerifyOTPView(APIView):
     def post(self, request):
         phone = request.data.get('phone')
         code = request.data.get('code')
-        social_token = request.data.get('social_token')  # optional — links a social identity
 
         # 1. Check OTP
         try:
@@ -67,28 +72,7 @@ class VerifyOTPView(APIView):
         # 2. Get or Create User
         user, created = User.objects.get_or_create(phone_number=phone)
 
-        # 3. Link social identity if a signed social_token was provided
-        if social_token:
-            try:
-                payload = signing.loads(social_token, max_age=600)  # 10-minute window
-                provider = payload['provider']
-                provider_id = str(payload['provider_id'])
-                identity, _ = UserIdentity.objects.get_or_create(
-                    provider=provider,
-                    provider_id=provider_id,
-                    defaults={'user': user},
-                )
-                if identity.user_id != user.pk:
-                    logger.warning(
-                        'social_token %s:%s already linked to user %s; ignoring for user %s',
-                        provider, provider_id, identity.user_id, user.pk,
-                    )
-            except signing.BadSignature:
-                return Response({'error': 'Invalid or expired social_token'}, status=status.HTTP_400_BAD_REQUEST)
-            except (KeyError, TypeError):
-                return Response({'error': 'Malformed social_token payload'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 4. Generate Tokens
+        # 3. Generate Tokens
         refresh = RefreshToken.for_user(user)
 
         # 5. Check if onboarding is needed

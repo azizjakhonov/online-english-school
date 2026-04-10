@@ -260,12 +260,30 @@ class StudentProfileAdmin(ModelAdmin):
         ('Credits (read-only — use list actions to change)', {
             'fields': ('lesson_credits', 'credits_reserved'),
         }),
+        ('🔑 Admin Actions', {
+            'fields': ('login_as_student_btn',),
+        }),
     )
-    readonly_fields = ('lesson_credits', 'credits_reserved', 'avatar_preview')
+    readonly_fields = ('lesson_credits', 'credits_reserved', 'avatar_preview', 'login_as_student_btn')
     # Notes + credit ledger FK → StudentProfile → work on this page ✓
     inlines = [AdminNoteInline, CreditTransactionInline]
 
     actions = ['add_5_credits', 'remove_1_credit', 'mark_trial', 'mark_paying', 'mark_inactive', 'mark_churned']
+
+    def login_as_student_btn(self, obj):
+        if not obj.pk:
+            return '—'
+        return format_html(
+            '<a href="/admin/impersonate/{}" target="_blank" '
+            'style="display:inline-flex;align-items:center;gap:8px;'
+            'background:#dc2626;color:#fff;padding:10px 20px;border-radius:8px;'
+            'font-weight:bold;font-size:13px;text-decoration:none;'
+            'box-shadow:0 2px 8px rgba(220,38,38,.35);margin-top:4px" '
+            'onclick="return confirm(\'Login as this student? An audit log entry will be created.\');">'
+            '🔑 Login as this Student</a>',
+            obj.user.id,
+        )
+    login_as_student_btn.short_description = 'Impersonate'
 
     @admin.action(description='➕ Add 5 credits')
     def add_5_credits(self, request, queryset):
@@ -376,7 +394,26 @@ class TeacherProfileAdmin(ModelAdmin):
             'fields': ('rate_per_lesson_uzs', 'payout_day'),
             'description': 'UZS salary per lesson and monthly payout day (1–28).',
         }),
+        ('🔑 Admin Actions', {
+            'fields': ('login_as_teacher_btn',),
+        }),
     )
+    readonly_fields = ('avatar_preview', 'login_as_teacher_btn')
+
+    def login_as_teacher_btn(self, obj):
+        if not obj.pk:
+            return '—'
+        return format_html(
+            '<a href="/admin/impersonate/{}" target="_blank" '
+            'style="display:inline-flex;align-items:center;gap:8px;'
+            'background:#7c3aed;color:#fff;padding:10px 20px;border-radius:8px;'
+            'font-weight:bold;font-size:13px;text-decoration:none;'
+            'box-shadow:0 2px 8px rgba(124,58,237,.35);margin-top:4px" '
+            'onclick="return confirm(\'Login as this teacher? An audit log entry will be created.\');">'
+            '🔑 Login as this Teacher</a>',
+            obj.user.id,
+        )
+    login_as_teacher_btn.short_description = 'Impersonate'
 
     def avatar_preview(self, obj):
         if not obj.user.profile_picture:
@@ -698,15 +735,17 @@ class ActivityEventAdmin(ModelAdmin):
 # ════════════════════════════════════════════════════════════════════
 from django.urls import path as _path
 from accounts.admin_views import AnalyticsAdminView, CRMBoardView, CRMMoveView
+from accounts.impersonation import ImpersonateRedirectView
 
 _orig_get_urls = admin.AdminSite.get_urls
 
 
 def _custom_get_urls(self):
     custom = [
-        _path('analytics/',  self.admin_view(AnalyticsAdminView.as_view()), name='analytics'),
-        _path('crm/',        self.admin_view(CRMBoardView.as_view()),        name='crm_board'),
-        _path('crm/move/',   self.admin_view(CRMMoveView.as_view()),         name='crm_move'),
+        _path('analytics/',              self.admin_view(AnalyticsAdminView.as_view()),      name='analytics'),
+        _path('crm/',                    self.admin_view(CRMBoardView.as_view()),             name='crm_board'),
+        _path('crm/move/',               self.admin_view(CRMMoveView.as_view()),              name='crm_move'),
+        _path('impersonate/<int:user_id>/', ImpersonateRedirectView.as_view(),                name='impersonate'),
     ]
     return custom + _orig_get_urls(self)
 

@@ -16,7 +16,10 @@ interface Lesson {
   meeting_link: string;
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentSchedule() {
+  usePageTitle('My Schedule');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [lessons, setLessons] = useState<Lesson[]>([]);

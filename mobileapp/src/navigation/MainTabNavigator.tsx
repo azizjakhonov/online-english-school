@@ -23,12 +23,17 @@ import LeaderboardScreen from '../features/dashboard/LeaderboardScreen';
 import HomeworkScreen from '../features/dashboard/HomeworkScreen';
 import { Colors } from '../theme';
 import { useAuth } from '../features/auth/AuthContext';
+import { usePushToken } from '../hooks/usePushToken';
 
 const Tab = createBottomTabNavigator();
 
 export default function MainTabNavigator() {
     const { user } = useAuth();
     const role = user?.role?.toUpperCase();
+
+    // Register / refresh the Expo push token once per authenticated session.
+    // Fires on mount — this component is only rendered when the user is logged in.
+    usePushToken();
     const isTeacher = role === 'TEACHER';
 
     return (

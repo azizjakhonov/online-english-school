@@ -76,7 +76,10 @@ function FunnelStepRow({
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function FunnelPanel() {
+  usePageTitle('Conversion Funnel');
   const [period, setPeriod] = useState(30)
 
   const { data, isLoading } = useQuery<FunnelData>({

@@ -1,12 +1,13 @@
 {
   "expo": {
-    "name": "mobileapp",
-    "slug": "mobileapp",
+    "name": "Allright",
+    "slug": "allright",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "scheme": "allright",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -14,10 +15,13 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "uz.allright.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "OnlineSchool needs access to your camera for live video lessons.",
-        "NSMicrophoneUsageDescription": "OnlineSchool needs access to your microphone for audio in live lessons."
-      }
+        "NSCameraUsageDescription": "Allright needs access to your camera for live video lessons.",
+        "NSMicrophoneUsageDescription": "Allright needs access to your microphone for audio in live lessons.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bitcode": false
     },
     "android": {
       "adaptiveIcon": {
@@ -28,17 +32,42 @@
         "CAMERA",
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
-        "INTERNET"
+        "INTERNET",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.mobileapp"
+      "package": "uz.allright.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-web-browser"
-    ]
+      "expo-web-browser",
+      "expo-notifications",
+      [
+        "@livekit/react-native-expo-plugin",
+        {}
+      ],
+      [
+        "@config-plugins/react-native-webrtc"
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8cef03e0-3846-4a03-add9-8415b5bb9616"
+      }
+    }
   }
 }

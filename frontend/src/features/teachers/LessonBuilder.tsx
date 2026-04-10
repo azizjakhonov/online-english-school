@@ -182,9 +182,12 @@ function defaultTitle(type: ActivityType) {
   }
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function LessonBuilder() {
   const navigate = useNavigate();
   const location = useLocation();
+  usePageTitle(location.pathname.includes('/homework') ? 'Homework Builder' : 'Lesson Builder');
   const { id } = useParams<{ id?: string }>();
 
   const routeMode: BuilderMode = useMemo(

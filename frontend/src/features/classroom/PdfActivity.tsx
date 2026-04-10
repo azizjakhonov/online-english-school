@@ -13,11 +13,9 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { ChevronLeft, ChevronRight, Loader2, FileText, RefreshCw } from 'lucide-react';
 import { resolveApiUrl } from '../../lib/api';
 
-// Configure PDF.js worker (local copy bundled by Vite via new URL())
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+// Configure PDF.js worker via CDN to avoid Nginx .mjs MIME type issues.
+// Version must match the installed pdfjs-dist package (5.4.296).
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PdfContent {
   pdf_id?: number;
@@ -327,15 +325,15 @@ export default memo(function PdfActivity({
 
   const renderWidth =
     viewportSize.width > 0 &&
-    viewportSize.height > 0 &&
-    pageSize
+      viewportSize.height > 0 &&
+      pageSize
       ? (() => {
-          const scale = Math.min(
-            viewportSize.width / pageSize.width,
-            viewportSize.height / pageSize.height,
-          );
-          return pageSize.width * scale;
-        })()
+        const scale = Math.min(
+          viewportSize.width / pageSize.width,
+          viewportSize.height / pageSize.height,
+        );
+        return pageSize.width * scale;
+      })()
       : undefined;
 
   const onPageLoadSuccess = useCallback(({ width, height }: { width: number; height: number }) => {

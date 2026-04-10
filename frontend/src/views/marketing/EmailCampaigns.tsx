@@ -1,7 +1,7 @@
 import { memo, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import ReactQuill from 'react-quill'
-import 'react-quill/dist/quill.snow.css'
+import ReactQuill from 'react-quill-new'
+import 'react-quill-new/dist/quill.snow.css'
 import api from '../../lib/api'
 import {
   Plus, Send, Pencil, Trash2, Loader2, Mail, Users, CheckCircle, XCircle,
@@ -22,26 +22,30 @@ interface EmailCampaign {
   sent_at: string | null
   recipients_count: number
   delivered_count: number
+  opened_count: number
+  clicked_count: number
   bounced_count: number
+  open_rate: number
+  click_rate: number
   created_at: string
 }
 
 const AUDIENCE_LABELS: Record<string, string> = {
-  all:              'All users',
-  students:         'All students',
-  teachers:         'All teachers',
-  inactive_students:'Inactive students (30d)',
-  new_signups:      'New sign-ups (7d)',
-  paid_students:    'Paid students',
-  free_students:    'Free students',
+  all: 'All users',
+  students: 'All students',
+  teachers: 'All teachers',
+  inactive_students: 'Inactive students (30d)',
+  new_signups: 'New sign-ups (7d)',
+  paid_students: 'Paid students',
+  free_students: 'Free students',
 }
 
 const STATUS_CLASSES: Record<string, string> = {
-  draft:     'bg-stone-100 text-stone-600',
+  draft: 'bg-stone-100 text-stone-600',
   scheduled: 'bg-blue-100 text-blue-700',
-  sending:   'bg-amber-100 text-amber-700',
-  sent:      'bg-emerald-100 text-emerald-700',
-  failed:    'bg-red-100 text-red-600',
+  sending: 'bg-amber-100 text-amber-700',
+  sent: 'bg-emerald-100 text-emerald-700',
+  failed: 'bg-red-100 text-red-600',
 }
 
 // ─── Quill toolbar ────────────────────────────────────────────────────────────
@@ -67,15 +71,15 @@ interface ModalProps {
 
 const CampaignModal = memo(function CampaignModal({ initial, onClose, onSaved }: ModalProps) {
   const isEdit = !!initial?.id
-  const [name, setName]             = useState(initial?.name ?? '')
-  const [subject, setSubject]       = useState(initial?.subject ?? '')
-  const [preview, setPreview]       = useState(initial?.preview_text ?? '')
-  const [htmlBody, setHtmlBody]     = useState(initial?.html_body ?? '')
-  const [plainText, setPlainText]   = useState(initial?.plain_text_body ?? '')
-  const [audience, setAudience]     = useState(initial?.audience ?? 'all')
+  const [name, setName] = useState(initial?.name ?? '')
+  const [subject, setSubject] = useState(initial?.subject ?? '')
+  const [preview, setPreview] = useState(initial?.preview_text ?? '')
+  const [htmlBody, setHtmlBody] = useState(initial?.html_body ?? '')
+  const [plainText, setPlainText] = useState(initial?.plain_text_body ?? '')
+  const [audience, setAudience] = useState(initial?.audience ?? 'all')
   const [scheduledAt, setScheduled] = useState(initial?.scheduled_at?.slice(0, 16) ?? '')
-  const [saving, setSaving]         = useState(false)
-  const [error, setError]           = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSave = useCallback(async () => {
     if (!name.trim() || !subject.trim() || !htmlBody.trim()) {
@@ -264,6 +268,16 @@ const CampaignRow = memo(function CampaignRow({ campaign: c, onEdit, onDelete, o
           <span className="text-stone-300">—</span>
         )}
       </td>
+      <td className="px-4 py-3 text-xs text-stone-600">
+        {c.status === 'sent' && c.delivered_count > 0 ? (
+          <div className="flex flex-col gap-0.5">
+            <span className="text-violet-600">{c.open_rate}% open</span>
+            <span className="text-blue-500">{c.click_rate}% click</span>
+          </div>
+        ) : (
+          <span className="text-stone-300">—</span>
+        )}
+      </td>
       <td className="px-4 py-3 text-xs text-stone-400">
         {c.sent_at
           ? new Date(c.sent_at).toLocaleDateString()
@@ -306,7 +320,10 @@ const CampaignRow = memo(function CampaignRow({ campaign: c, onEdit, onDelete, o
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function EmailCampaigns() {
+  usePageTitle('Email Campaigns');
   const qc = useQueryClient()
   const [modalData, setModalData] = useState<Partial<EmailCampaign> | null | false>(false)
   const [sendingId, setSendingId] = useState<number | null>(null)
@@ -345,10 +362,10 @@ export default function EmailCampaigns() {
   }, [qc])
 
   // ── Stats summary ──────────────────────────────────────────────────────────
-  const totalSent      = campaigns.filter(c => c.status === 'sent').length
+  const totalSent = campaigns.filter(c => c.status === 'sent').length
   const totalDelivered = campaigns.reduce((s, c) => s + c.delivered_count, 0)
-  const totalRecip     = campaigns.reduce((s, c) => s + c.recipients_count, 0)
-  const avgDelivery    = totalRecip ? Math.round((totalDelivered / totalRecip) * 100) : 0
+  const totalRecip = campaigns.reduce((s, c) => s + c.recipients_count, 0)
+  const avgDelivery = totalRecip ? Math.round((totalDelivered / totalRecip) * 100) : 0
 
   return (
     <div className="space-y-5">
@@ -402,6 +419,7 @@ export default function EmailCampaigns() {
                   <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">
                     <span className="flex items-center gap-1"><Users className="w-3 h-3" />Delivery</span>
                   </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Engagement</th>
                   <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Date</th>
                   <th className="px-4 py-3" />
                 </tr>

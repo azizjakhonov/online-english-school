@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import storage from '../../lib/storage';
 import client from '../../api/client';
 
 export interface User {
@@ -22,8 +22,7 @@ export interface User {
 interface AuthContextType {
     user: User | null;
     isLoading: boolean;
-    /** socialToken: signed token returned by the backend when a social login requires phone verification */
-    login: (phone: string, code: string, socialToken?: string) => Promise<boolean>;
+    login: (phone: string, code: string) => Promise<boolean>;
     logout: () => void;
     refreshUser: () => Promise<void>;
     selectRole: (role: 'STUDENT' | 'TEACHER', fullName: string) => Promise<void>;
@@ -38,7 +37,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     useEffect(() => {
         const checkAuth = async () => {
             try {
-                const token = await SecureStore.getItemAsync('access_token');
+                const token = await storage.getItemAsync('access_token');
                 if (token) {
                     const response = await client.get('/api/me/');
                     setUser(response.data);
@@ -50,8 +49,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 } else {
                     console.error('Check auth failed:', error);
                 }
-                await SecureStore.deleteItemAsync('access_token');
-                await SecureStore.deleteItemAsync('refresh_token');
+                await storage.deleteItemAsync('access_token');
+                await storage.deleteItemAsync('refresh_token');
                 setUser(null);
             } finally {
                 setIsLoading(false);
@@ -60,14 +59,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         checkAuth();
     }, []);
 
-    const login = async (phone: string, code: string, socialToken?: string): Promise<boolean> => {
-        const payload: Record<string, string> = { phone, code };
-        if (socialToken) payload.social_token = socialToken;
-        const response = await client.post('/api/accounts/verify-otp/', payload);
+    const login = async (phone: string, code: string): Promise<boolean> => {
+        const response = await client.post('/api/accounts/verify-otp/', { phone, code });
 
         const { access, refresh, is_new_user } = response.data;
-        await SecureStore.setItemAsync('access_token', access);
-        await SecureStore.setItemAsync('refresh_token', refresh);
+        await storage.setItemAsync('access_token', access);
+        await storage.setItemAsync('refresh_token', refresh);
 
         if (!is_new_user) {
             const userResponse = await client.get('/api/me/');
@@ -87,8 +84,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const logout = async () => {
-        await SecureStore.deleteItemAsync('access_token');
-        await SecureStore.deleteItemAsync('refresh_token');
+        await storage.deleteItemAsync('access_token');
+        await storage.deleteItemAsync('refresh_token');
         setUser(null);
     };
 

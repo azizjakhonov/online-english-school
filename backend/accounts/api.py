@@ -7,11 +7,10 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils import timezone
-from django.core import signing
 from django.shortcuts import get_object_or_404
 
 # Local imports
-from .models import TeacherProfile, StudentProfile, UserIdentity
+from .models import TeacherProfile, StudentProfile
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -41,6 +40,7 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     average_rating = serializers.SerializerMethodField()
     total_ratings = serializers.SerializerMethodField()
+    subjects = serializers.SerializerMethodField()
 
     class Meta:
         model = TeacherProfile
@@ -48,7 +48,7 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
             'id', 'user', 'bio', 'headline', 'youtube_intro_url',
             'status', 'languages', 'language_certificates',
             'rating', 'lessons_taught', 'is_accepting_students',
-            'average_rating', 'total_ratings',
+            'average_rating', 'total_ratings', 'subjects',
         ]
 
     def get_average_rating(self, obj):
@@ -61,6 +61,13 @@ class TeacherProfileSerializer(serializers.ModelSerializer):
     def get_total_ratings(self, obj):
         from scheduling.models import LessonRating
         return LessonRating.objects.filter(teacher=obj.user).count()
+
+    def get_subjects(self, obj):
+        """Return list of {id, name} for this teacher's subjects."""
+        return [
+            {'id': ts.subject.id, 'name': ts.subject.name}
+            for ts in obj.teacher_subjects.select_related('subject').all()
+        ]
 
 class StudentProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
@@ -95,99 +102,6 @@ class MeSerializer(serializers.ModelSerializer):
             return obj.profile_picture.url
         return None
 
-
-
-class GoogleAuthView(APIView):
-    """
-    POST /api/auth/google/
-    Body: { "id_token": "<Google ID token>" }
-
-    Login Matrix:
-    1. Verify id_token with Google.
-    2. If UserIdentity(provider='google', provider_id=sub) exists → login that user.
-    3. Elif a User with the same email exists → link identity → login.
-    4. Else → return 202 with a signed social_token (client must complete OTP flow).
-    """
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        from google.oauth2 import id_token as google_id_token
-        from google.auth.transport import requests as google_requests
-        from django.conf import settings
-
-        raw_token = request.data.get('id_token')
-        if not raw_token:
-            return Response({'error': 'id_token is required'}, status=400)
-
-        client_id = settings.GOOGLE_OAUTH_CLIENT_ID
-        if not client_id:
-            logger.error('GOOGLE_OAUTH_CLIENT_ID is not configured')
-            return Response({'error': 'Google auth is not configured on this server'}, status=500)
-
-        # 1. Verify token
-        try:
-            idinfo = google_id_token.verify_oauth2_token(
-                raw_token,
-                google_requests.Request(),
-                client_id,
-            )
-        except ValueError as exc:
-            return Response({'error': f'Invalid id_token: {exc}'}, status=400)
-
-        sub = idinfo['sub']          # Google's unique user ID
-        email = idinfo.get('email')
-        first_name = idinfo.get('given_name', '')
-        last_name = idinfo.get('family_name', '')
-
-        # 2. Check for existing Google identity
-        try:
-            identity = UserIdentity.objects.select_related('user').get(
-                provider='google', provider_id=sub
-            )
-            return Response(_jwt_response(identity.user))
-        except UserIdentity.DoesNotExist:
-            pass
-
-        # 3. Check for matching email → link and login
-        if email:
-            try:
-                existing_user = User.objects.get(email=email)
-                UserIdentity.objects.get_or_create(
-                    provider='google',
-                    provider_id=sub,
-                    defaults={'user': existing_user},
-                )
-                return Response(_jwt_response(existing_user))
-            except User.DoesNotExist:
-                pass
-
-        # 4. New Google user — client must verify phone OTP first
-        social_token = signing.dumps({
-            'provider': 'google',
-            'provider_id': sub,
-            'email': email or '',
-            'first_name': first_name,
-            'last_name': last_name,
-        })
-        return Response(
-            {
-                'detail': 'Phone verification required',
-                'social_token': social_token,
-            },
-            status=status.HTTP_202_ACCEPTED,
-        )
-
-
-def _jwt_response(user):
-    """Return standard JWT login payload."""
-    refresh = RefreshToken.for_user(user)
-    is_new = user.role == 'NEW' or not user.full_name
-    return {
-        'refresh': str(refresh),
-        'access': str(refresh.access_token),
-        'role': user.role,
-        'is_new_user': is_new,
-    }
 
 
 class SelectRoleView(APIView):
@@ -284,16 +198,22 @@ class TeachersListView(generics.ListAPIView):
     permission_classes = [AllowAny] # Changed to AllowAny so guests can see teachers
 
     def get_queryset(self):
-        queryset = TeacherProfile.objects.filter(status='active').order_by('-rating')
-        
-        # Search Filter
+        queryset = (
+            TeacherProfile.objects
+            .filter(status='active')
+            .prefetch_related('teacher_subjects__subject')
+            .order_by('-rating')
+        )
+
+        # Search Filter: name, headline, or subject name
         q = self.request.query_params.get('q')
         if q:
             queryset = queryset.filter(
-                models.Q(user__full_name__icontains=q) | 
-                models.Q(headline__icontains=q)
-            )
-            
+                models.Q(user__full_name__icontains=q) |
+                models.Q(headline__icontains=q) |
+                models.Q(teacher_subjects__subject__name__icontains=q)
+            ).distinct()
+
         return queryset
 
 
@@ -538,32 +458,6 @@ class TeacherSettingsView(APIView):
 
         profile.save()
         return Response({'detail': 'Profile updated.'})
-
-
-# ============================================================================
-# 7. CONNECTED ACCOUNTS
-# ============================================================================
-
-class ConnectedAccountListView(APIView):
-    """
-    GET /api/connected-accounts/
-    Returns the current user's connected social identities.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        identities = UserIdentity.objects.filter(user=request.user, is_active=True)
-        data = [
-            {
-                'provider':     i.provider,
-                'provider_id':  i.provider_id,
-                'email':        i.email,
-                'username':     i.username,
-                'connected_at': i.connected_at.isoformat() if i.connected_at else None,
-            }
-            for i in identities
-        ]
-        return Response(data)
 
 
 # ============================================================================

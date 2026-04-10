@@ -8,60 +8,69 @@ from decimal import Decimal
 from django.db import transaction
 from django.contrib.auth import get_user_model
 
-from .models import Payment
+from .models import Payment, CreditPackage
 
 User = get_user_model()
 
-# -------------------------------------------------------------------
-# Package catalogue (UZS prices + USD cents for Stripe)
-# -------------------------------------------------------------------
-PACKAGES = {
-    1: {'credits': 5,  'amount_uzs': Decimal('500000'),  'label': 'Starter',  'amount_usd_cents': 500},
-    2: {'credits': 20, 'amount_uzs': Decimal('1800000'), 'label': 'Standard', 'amount_usd_cents': 2000},
-    3: {'credits': 50, 'amount_uzs': Decimal('4000000'), 'label': 'Pro',      'amount_usd_cents': 5000},
-}
-
 
 def get_packages():
-    """Return the package catalogue in frontend-ready format with UZS pricing."""
-    # Base price per credit: Starter package (500 000 UZS / 5 credits = 100 000 / credit)
-    base_price_per_credit = int(PACKAGES[1]['amount_uzs']) // PACKAGES[1]['credits']
+    """Return all active credit packages from DB in frontend-ready format."""
+    packages = list(CreditPackage.objects.filter(is_active=True).order_by('sort_order', 'price_uzs'))
+    if not packages:
+        return []
+
+    # Cheapest price-per-credit is the baseline (discount % relative to it)
+    base_price_per_credit = min(
+        int(p.price_uzs) / p.credits for p in packages
+    )
+
     result = []
-    for pk, info in PACKAGES.items():
-        credits = info['credits']
-        price_uzs = int(info['amount_uzs'])
-        price_per_credit = price_uzs // credits
+    for pkg in packages:
+        price_uzs = int(pkg.price_uzs)
+        price_per_credit = price_uzs / pkg.credits
         discount_pct = max(0, round((1 - price_per_credit / base_price_per_credit) * 100))
         result.append({
-            'id':                   pk,
-            'name':                 info['label'],
-            'credits':              credits,
+            'id':                   pkg.id,
+            'name':                 pkg.name,
+            'credits':              pkg.credits,
             'price_uzs':            price_uzs,
+            'is_popular':           pkg.is_popular,
+            'features':             pkg.features,
+            'validity_label':       pkg.validity_label,
             'discount_percent':     discount_pct,
-            'price_per_credit_uzs': price_per_credit,
+            'price_per_credit_uzs': round(price_per_credit),
         })
     return result
 
 
-def create_stripe_checkout_session(user, package_id: int):
+def _get_package(package_id: int) -> CreditPackage:
+    """Look up an active CreditPackage or raise ValueError."""
+    try:
+        return CreditPackage.objects.get(id=package_id, is_active=True)
+    except CreditPackage.DoesNotExist:
+        raise ValueError(f"Invalid package_id: {package_id}")
+
+
+def create_stripe_checkout_session(user, package_id: int, amount_uzs_override: Decimal = None):
     """
     Create a PENDING Payment record and a Stripe Checkout Session.
     Returns (payment, checkout_url).
-
-    Credits are NOT granted here — they are granted by the webhook handler
-    (StripeWebhookView) once Stripe confirms the payment succeeded.
     """
     import stripe
     from django.conf import settings
 
-    package = PACKAGES.get(package_id)
-    if package is None:
-        raise ValueError(f"Invalid package_id: {package_id}")
+    pkg = _get_package(package_id)
+    final_amount_uzs = amount_uzs_override if amount_uzs_override is not None else pkg.price_uzs
+
+    # Convert UZS to USD cents using a configurable rate (default ~12700 UZS/USD)
+    uzs_to_usd_rate = float(getattr(settings, 'STRIPE_UZS_TO_USD_RATE', 12700))
+    amount_usd_cents = max(50, round(int(final_amount_uzs) / uzs_to_usd_rate * 100))
 
     payment = Payment.objects.create(
         student=user,
-        credits_amount=package['credits'],
-        amount_uzs=package['amount_uzs'],
+        package=pkg,
+        credits_amount=pkg.credits,
+        amount_uzs=final_amount_uzs,
         method=Payment.Method.CARD,
         provider=Payment.Provider.STRIPE,
         status=Payment.Status.PENDING,
@@ -78,10 +87,10 @@ def create_stripe_checkout_session(user, package_id: int):
         line_items=[{
             'price_data': {
                 'currency': 'usd',
-                'unit_amount': package['amount_usd_cents'],
+                'unit_amount': amount_usd_cents,
                 'product_data': {
-                    'name': f"{package['label']} – {package['credits']} Lesson Credits",
-                    'description': f"Purchase {package['credits']} credits for online English lessons.",
+                    'name': f"{pkg.name} – {pkg.credits} Lesson Credits",
+                    'description': f"Purchase {pkg.credits} credits for online English lessons.",
                 },
             },
             'quantity': 1,
@@ -115,17 +124,16 @@ def purchase_credits(
     if metadata is None:
         metadata = {}
 
-    package = PACKAGES.get(package_id)
-    if package is None:
-        raise ValueError(f"Invalid package_id: {package_id}")
+    pkg = _get_package(package_id)
 
     from accounts.models import StudentProfile  # avoid circular import at module level
 
-    final_amount_uzs = amount_uzs_override if amount_uzs_override is not None else package['amount_uzs']
+    final_amount_uzs = amount_uzs_override if amount_uzs_override is not None else pkg.price_uzs
 
     payment = Payment.objects.create(
         student=user,
-        credits_amount=package['credits'],
+        package=pkg,
+        credits_amount=pkg.credits,
         amount_uzs=final_amount_uzs,
         method=method,
         provider=provider,
@@ -140,7 +148,7 @@ def purchase_credits(
     try:
         with transaction.atomic():
             profile, _ = StudentProfile.objects.select_for_update().get_or_create(user=user)
-            profile.lesson_credits = profile.lesson_credits + package['credits']
+            profile.lesson_credits = profile.lesson_credits + pkg.credits
             profile.save(update_fields=['lesson_credits'])
 
             payment.status = Payment.Status.SUCCEEDED
@@ -152,3 +160,53 @@ def purchase_credits(
         raise
 
     return payment
+
+
+def grant_credits_for_payment(payment: Payment) -> None:
+    """
+    Atomically grant credits for an already-created PENDING payment.
+    Used by PayMe / Click / Stripe webhook handlers.
+    """
+    from accounts.models import StudentProfile
+    from marketing.models import DiscountCode, DiscountCodeUsage
+    from django.db.models import F
+
+    if payment.status == Payment.Status.SUCCEEDED:
+        return
+
+    with transaction.atomic():
+        payment = Payment.objects.select_for_update().get(pk=payment.pk)
+        if payment.status == Payment.Status.SUCCEEDED:
+            return
+
+        user = payment.student
+        profile, _ = StudentProfile.objects.select_for_update().get_or_create(user=user)
+
+        # 1. Grant package credits
+        total_granted = payment.credits_amount
+
+        # 2. Check for discount code in metadata
+        discount_code_str = payment.metadata.get('discount_code')
+        if discount_code_str:
+            try:
+                code = DiscountCode.objects.get(code=discount_code_str.upper())
+                # Record usage
+                DiscountCodeUsage.objects.create(
+                    code=code,
+                    user=user,
+                    payment=payment,
+                    discount_applied=float((payment.package.price_uzs if payment.package else payment.amount_uzs) - payment.amount_uzs),
+                )
+                DiscountCode.objects.filter(pk=code.pk).update(times_used=F('times_used') + 1)
+
+                # Grant free credits if applicable
+                if code.discount_type == 'free_credits':
+                    total_granted += int(code.discount_value)
+            except DiscountCode.DoesNotExist:
+                pass
+
+        profile.lesson_credits = profile.lesson_credits + total_granted
+        profile.save(update_fields=['lesson_credits'])
+
+        payment.status = Payment.Status.SUCCEEDED
+        payment.save(update_fields=['status', 'updated_at'])

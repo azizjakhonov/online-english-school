@@ -1,8 +1,27 @@
 import { useState, useEffect } from 'react';
-import { Search, Star, Clock, ChevronLeft } from 'lucide-react';
+import { Search, Star, Clock, ChevronLeft, Globe, BookOpen } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/api';
 import Avatar from '../../components/Avatar';
+
+// Proficiency → colour mapping (shared across pages)
+const PROF_COLORS: Record<string, string> = {
+  Native: 'bg-violet-100 text-violet-700 border-violet-200',
+  Fluent: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  Intermediate: 'bg-blue-100 text-blue-700 border-blue-200',
+  Basic: 'bg-amber-100 text-amber-700 border-amber-200',
+};
+const getProfColor = (p: string) => PROF_COLORS[p] ?? 'bg-slate-100 text-slate-600 border-slate-200';
+
+interface Subject {
+  id: number;
+  name: string;
+}
+
+interface Language {
+  language: string;
+  proficiency: string;
+}
 
 interface Teacher {
   id: number;
@@ -15,9 +34,14 @@ interface Teacher {
   rating: number;
   lessons_taught: number;
   is_accepting_students: boolean;
+  subjects: Subject[];
+  languages: Language[];
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function FindTeachersPage() {
+  usePageTitle('Find a Teacher');
   const navigate = useNavigate();
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +53,6 @@ export default function FindTeachersPage() {
 
   const fetchTeachers = async () => {
     try {
-      // Fetch the list from our backend
       const { data } = await api.get('/api/teachers/');
       setTeachers(data);
     } catch (err) {
@@ -39,15 +62,21 @@ export default function FindTeachersPage() {
     }
   };
 
-  // Filter teachers based on search
-  const filteredTeachers = teachers.filter(t => 
-    t.user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.headline.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter teachers based on search — name, headline, or any subject
+  const filteredTeachers = teachers.filter(t => {
+    const q = searchTerm.toLowerCase();
+    if (!q) return true;
+    return (
+      t.user.full_name.toLowerCase().includes(q) ||
+      t.headline.toLowerCase().includes(q) ||
+      t.subjects.some(s => s.name.toLowerCase().includes(q)) ||
+      t.languages.some(l => l.language.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      {/* Header — same pattern as TeacherLessonHistory */}
+      {/* Header */}
       <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-4 flex items-center gap-4 sticky top-0 z-20">
         <button
           onClick={() => navigate('/dashboard')}
@@ -68,13 +97,13 @@ export default function FindTeachersPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        {/* Search bar — same card style as TeacherLessonHistory filters */}
+        {/* Search bar */}
         <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-8">
           <div className="relative flex-1 min-w-0">
             <Search size={16} className="absolute left-3 top-2.5 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by name or subject…"
+              placeholder="Search by name, subject, or language…"
               className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -98,43 +127,82 @@ export default function FindTeachersPage() {
             </div>
           </div>
         ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTeachers.map((teacher) => (
-            <div
-              key={teacher.id}
-              onClick={() => navigate(`/teacher/${teacher.id}`)}
-              className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:border-slate-300 transition-colors group cursor-pointer"
-            >
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <Avatar
-                    url={teacher.user.profile_picture_url}
-                    name={teacher.user.full_name}
-                    size={56}
-                  />
-                  <div className="flex items-center gap-1 bg-yellow-50 px-2 py-1 rounded-lg">
-                    <Star size={14} className="text-yellow-500 fill-yellow-500" />
-                    <span className="text-xs font-bold text-yellow-700">{teacher.rating}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredTeachers.map((teacher) => (
+              <div
+                key={teacher.id}
+                onClick={() => navigate(`/teacher/${teacher.id}`)}
+                className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:border-blue-300 hover:shadow-md transition-all group cursor-pointer"
+              >
+                <div className="p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="relative">
+                      <Avatar
+                        url={teacher.user.profile_picture_url}
+                        name={teacher.user.full_name}
+                        size={56}
+                      />
+                      {!teacher.is_accepting_students && (
+                        <div className="absolute -bottom-1 -right-1 bg-amber-400 rounded-full w-4 h-4 border-2 border-white" title="Not accepting new students" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 bg-yellow-50 px-2 py-1 rounded-lg">
+                      <Star size={14} className="text-yellow-500 fill-yellow-500" />
+                      <span className="text-xs font-bold text-yellow-700">{teacher.rating}</span>
+                    </div>
                   </div>
-                </div>
-                
-                <h3 className="text-lg font-bold text-slate-900 mb-1">{teacher.user.full_name}</h3>
-                <p className="text-sm text-blue-600 font-medium mb-3 line-clamp-1">{teacher.headline || "Professional Teacher"}</p>
-                <p className="text-sm text-slate-500 line-clamp-2 mb-6 h-10">{teacher.bio || "No bio yet."}</p>
 
-                <div className="flex items-center pt-4 border-t border-slate-100">
-                  <div className="flex items-center gap-2 text-slate-500 text-xs font-bold">
-                     <Clock size={14} />
-                     {teacher.lessons_taught} lessons taught
+                  <h3 className="text-lg font-bold text-slate-900 mb-1">{teacher.user.full_name}</h3>
+                  <p className="text-sm text-blue-600 font-medium mb-3 line-clamp-1">{teacher.headline || "Professional Teacher"}</p>
+
+                  {/* Subjects */}
+                  {teacher.subjects.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {teacher.subjects.slice(0, 3).map(s => (
+                        <span key={s.id} className="inline-flex items-center gap-1 text-xs font-semibold bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
+                          <BookOpen size={10} />
+                          {s.name}
+                        </span>
+                      ))}
+                      {teacher.subjects.length > 3 && (
+                        <span className="text-xs font-semibold text-slate-400">+{teacher.subjects.length - 3}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Languages — colour-coded by proficiency */}
+                  {teacher.languages.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {teacher.languages.slice(0, 3).map((l, i) => (
+                        <span
+                          key={i}
+                          className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full border ${getProfColor(l.proficiency)}`}
+                        >
+                          <Globe size={9} />
+                          {l.language}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-sm text-slate-500 line-clamp-2 mb-4 h-10">{teacher.bio || "No bio yet."}</p>
+
+                  <div className="flex items-center pt-4 border-t border-slate-100">
+                    <div className="flex items-center gap-2 text-slate-500 text-xs font-bold">
+                      <Clock size={14} />
+                      {teacher.lessons_taught} lessons taught
+                    </div>
+                    {!teacher.is_accepting_students && (
+                      <span className="ml-auto text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Full</span>
+                    )}
                   </div>
                 </div>
+                <div className="bg-slate-50 p-3 text-center text-sm font-bold text-blue-600 group-hover:bg-blue-100 transition-colors border-t border-slate-100">
+                  View Profile
+                </div>
               </div>
-              <div className="bg-slate-50 p-3 text-center text-sm font-bold text-blue-600 group-hover:bg-blue-100 transition-colors border-t border-slate-100">
-                View Profile
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
         )}
       </main>
     </div>

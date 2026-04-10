@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Save, ArrowLeft, Loader2 } from 'lucide-react';
 import api from '../../lib/api';
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function AdminLessonCreate() {
+  usePageTitle('Create Lesson');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({

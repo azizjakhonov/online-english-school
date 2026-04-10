@@ -45,7 +45,10 @@ const STATUS_STYLES: Record<string, string> = {
     USED: 'bg-gray-100 text-gray-500',
 };
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentPackages() {
+    usePageTitle('Lesson Packages');
     const qc = useQueryClient();
     const [tab, setTab] = useState<'store' | 'mine'>('store');
     const [buyingId, setBuyingId] = useState<number | null>(null);

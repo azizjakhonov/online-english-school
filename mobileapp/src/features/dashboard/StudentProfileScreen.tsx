@@ -46,6 +46,8 @@ export default function StudentProfileScreen({ navigation }: any) {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState<'lessons' | 'payments'>('lessons');
 
+    const [profileData, setProfileData] = useState<any>(null);
+
     const fetchData = async () => {
         if (user?.role !== 'STUDENT') {
             setIsLoading(false);
@@ -53,7 +55,7 @@ export default function StudentProfileScreen({ navigation }: any) {
         }
         try {
             const profileRes = await client.get('/api/accounts/student/profile/');
-            // No longer storing detailed history lists here, they are fetched in StudentHistoryScreen
+            setProfileData(profileRes.data);
         } catch (error) {
             console.error('Failed to fetch profile data', error);
         } finally {
@@ -120,6 +122,11 @@ export default function StudentProfileScreen({ navigation }: any) {
 
     const availableCredits = user?.student_profile?.available_credits ?? user?.student_profile?.lesson_credits ?? 0;
     const userLevel = user?.student_profile?.level || 'Intermediate';
+    const completedCount = profileData?.stats?.completed_lessons || 0;
+
+    // Count unlocked badges based on the same milestones as Web
+    const milestones = [1, 5, 10, 20, 50];
+    const unlockedBadges = milestones.filter(m => completedCount >= m).length;
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -173,7 +180,7 @@ export default function StudentProfileScreen({ navigation }: any) {
                         <View style={[styles.statIconBox, { backgroundColor: '#EEF2FF' }]}>
                             <BookOpen size={20} color={Colors.primary} />
                         </View>
-                        <Text style={styles.statValue}>{Object.keys(user?.student_profile || {}).length > 0 ? '12' : '0'}</Text>
+                        <Text style={styles.statValue}>{completedCount}</Text>
                         <Text style={styles.statLabel}>Lessons</Text>
                     </View>
 
@@ -181,7 +188,7 @@ export default function StudentProfileScreen({ navigation }: any) {
                         <View style={[styles.statIconBox, { backgroundColor: '#FFF7ED' }]}>
                             <Flame size={20} color="#F97316" />
                         </View>
-                        <Text style={styles.statValue}>12</Text>
+                        <Text style={styles.statValue}>0</Text>
                         <Text style={styles.statLabel}>Day Streak</Text>
                     </View>
 
@@ -189,7 +196,7 @@ export default function StudentProfileScreen({ navigation }: any) {
                         <View style={[styles.statIconBox, { backgroundColor: '#FEFCE8' }]}>
                             <Trophy size={20} color="#EAB308" />
                         </View>
-                        <Text style={styles.statValue}>8</Text>
+                        <Text style={styles.statValue}>{unlockedBadges}</Text>
                         <Text style={styles.statLabel}>Badges</Text>
                     </View>
                 </View>
@@ -238,12 +245,15 @@ export default function StudentProfileScreen({ navigation }: any) {
 
                         <View style={styles.divider} />
 
-                        <TouchableOpacity style={styles.menuItem}>
+                        <TouchableOpacity
+                            style={styles.menuItem}
+                            onPress={() => navigation.navigate('Leaderboard')}
+                        >
                             <View style={[styles.menuIconBox, { backgroundColor: '#F5F3FF' }]}>
                                 <ShieldCheck size={20} color="#8B5CF6" />
                             </View>
                             <View style={styles.menuTextContainer}>
-                                <Text style={styles.menuItemTitle}>Achievments</Text>
+                                <Text style={styles.menuItemTitle}>Achievements</Text>
                                 <Text style={styles.menuItemSub}>Badges & certificates</Text>
                             </View>
                             <ChevronRight size={20} color="#CBD5E1" />

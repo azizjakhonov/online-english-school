@@ -4,13 +4,15 @@ import {
   BookOpen, Clock, Trophy, Target, Video, LogOut, ChevronRight,
   PlayCircle, Calendar, Loader2, Users, DollarSign, Briefcase,
   FileText, CreditCard, PenTool, PlusCircle, Wallet,
-  Settings, Package, Coins
+  Settings, CheckCircle2, //Package, Coins,// 
 } from 'lucide-react';
 import api from '../../lib/api';
 import { useAuth } from '../auth/AuthContext';
 import Avatar from '../../components/Avatar';
 import { formatDate, formatMonthShort, formatDayNum, formatTime } from '../../utils/datetime';
 import BannerCarousel from './ui/BannerCarousel';
+import { BannerCarousel as MarketingBannerCarousel } from '../../components/marketing/BannerCarousel';
+import { InlineBanner } from '../../components/marketing/InlineBanner';
 
 // --- TYPES ---
 interface StudentProfile {
@@ -46,7 +48,10 @@ interface Lesson {
   status: string;
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function DashboardPage() {
+  usePageTitle('Dashboard');
   const { logout } = useAuth();
   const navigate = useNavigate();
 
@@ -180,6 +185,8 @@ function TeacherDashboard({ user, lessons, completedLessonsCount, onLogout }: { 
         </header>
 
         <BannerCarousel placement="teacher_home_top" />
+        <MarketingBannerCarousel audience="teacher" />
+        <InlineBanner audience="teacher" />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <StatCard label="Active Students" value={uniqueStudents} icon={<Users className="text-blue-500" />} trend="Total Unique" />
@@ -257,15 +264,15 @@ function StudentDashboard({ user, lessons, onLogout }: { user: User, lessons: Le
           <div onClick={() => navigate('/student/leaderboard')}>
             <NavItem icon={<Trophy size={20} />} label="Leaderboard" />
           </div>
-          <div onClick={() => navigate('/student/enrollments')}>
+          {/* <div onClick={() => navigate('/student/enrollments')}>
             <NavItem icon={<BookOpen size={20} />} label="My Courses" />
-          </div>
-          <div onClick={() => navigate('/student/packages')}>
+          </div> */}
+          {/* <div onClick={() => navigate('/student/packages')}>
             <NavItem icon={<Package size={20} />} label="Packages" />
-          </div>
-          <div onClick={() => navigate('/student/coins')}>
+          </div> */}
+          {/* <div onClick={() => navigate('/student/coins')}>
             <NavItem icon={<Coins size={20} />} label="Coins & Rewards" />
-          </div>
+          </div> */}
           <div onClick={() => navigate('/student/profile')}>
             <NavItem icon={<Settings size={20} />} label="Profile" />
           </div>
@@ -300,6 +307,8 @@ function StudentDashboard({ user, lessons, onLogout }: { user: User, lessons: Le
         </header>
 
         <BannerCarousel placement="student_home_top" />
+        <MarketingBannerCarousel audience="student" />
+        <InlineBanner audience="student" />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <StatCard
@@ -377,12 +386,20 @@ function StatCard({ label, value, icon, trend, highlight = false }: { label: str
 }
 
 function LessonRow({ lesson, role, onAction }: { lesson: Lesson, role: 'teacher' | 'student', onAction: () => void }) {
-  const isActive = new Date() >= new Date(lesson.start_time) && new Date() <= new Date(lesson.end_time);
+  const now = new Date();
+  const isActive = now >= new Date(lesson.start_time) && now <= new Date(lesson.end_time);
+  const isCompleted = lesson.status === 'COMPLETED';
 
   return (
-    <div className={`p-6 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-6 transition-all ${isActive ? 'bg-blue-50 border-blue-200 shadow-md' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
+    <div className={`p-6 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-6 transition-all ${isCompleted
+      ? 'bg-emerald-50 border-emerald-200'
+      : isActive
+        ? 'bg-blue-50 border-blue-200 shadow-md'
+        : 'bg-white border-slate-200 hover:border-blue-300'
+      }`}>
       <div className="flex items-center gap-4 w-full md:w-auto">
-        <div className={`h-16 w-16 rounded-2xl flex flex-col items-center justify-center font-bold shrink-0 ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+        <div className={`h-16 w-16 rounded-2xl flex flex-col items-center justify-center font-bold shrink-0 ${isCompleted ? 'bg-emerald-500 text-white' : isActive ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+          }`}>
           <span className="text-xs uppercase opacity-80">{formatMonthShort(lesson.start_time)}</span>
           <span className="text-2xl">{formatDayNum(lesson.start_time)}</span>
         </div>
@@ -395,9 +412,15 @@ function LessonRow({ lesson, role, onAction }: { lesson: Lesson, role: 'teacher'
           </p>
         </div>
       </div>
-      <button onClick={onAction} className={`w-full md:w-auto px-6 py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-md active:scale-95 ${isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-        <Video size={18} /> {isActive ? 'Join Now' : (role === 'teacher' ? 'Start Class' : 'Join Class')}
-      </button>
+      {isCompleted ? (
+        <div className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-emerald-100 text-emerald-700 font-bold text-sm">
+          <CheckCircle2 size={18} /> Completed
+        </div>
+      ) : (
+        <button onClick={onAction} className={`w-full md:w-auto px-6 py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-md active:scale-95 ${isActive ? 'bg-green-500 hover:bg-green-600 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+          <Video size={18} /> {isActive ? 'Join Now' : (role === 'teacher' ? 'Start Class' : 'Join Class')}
+        </button>
+      )}
     </div>
   );
 }

@@ -14,7 +14,10 @@ interface QuestionOption {
   is_correct: boolean;
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function AdminHomeworks() {
+  usePageTitle('Manage Homework');
   const [homeworks, setHomeworks] = useState<Homework[]>([]);
   const [view, setView] = useState<'list' | 'create'>('list');
 

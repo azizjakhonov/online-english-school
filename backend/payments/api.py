@@ -3,14 +3,18 @@ from decimal import Decimal
 
 from django.conf import settings as django_settings
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Sum, Count
 from rest_framework import generics, status, serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from .models import Payment
-from .services import purchase_credits, get_packages, create_stripe_checkout_session, PACKAGES
+from accounts.api import IsAdminRole
+from .models import Payment, CreditPackage, Package, StudentPackage
+from .services import (
+    purchase_credits, get_packages,
+    create_stripe_checkout_session, grant_credits_for_payment,
+)
 
 
 # ─── Discount code helper ─────────────────────────────────────────────────────
@@ -59,20 +63,48 @@ class PackageSerializer(serializers.Serializer):
     name                 = serializers.CharField()
     credits              = serializers.IntegerField()
     price_uzs            = serializers.IntegerField()
+    is_popular           = serializers.BooleanField()
+    features             = serializers.ListField(child=serializers.CharField())
+    validity_label       = serializers.CharField()
     discount_percent     = serializers.IntegerField()
     price_per_credit_uzs = serializers.IntegerField()
 
 
+class CreditPackageAdminSerializer(serializers.ModelSerializer):
+    sales_count = serializers.SerializerMethodField(read_only=True)
+    revenue_uzs = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model  = CreditPackage
+        fields = [
+            'id', 'name', 'credits', 'price_uzs', 'is_active', 'is_popular',
+            'sort_order', 'features', 'validity_label',
+            'created_at', 'updated_at',
+            'sales_count', 'revenue_uzs',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'sales_count', 'revenue_uzs']
+
+    def get_sales_count(self, obj):
+        return obj.payments.filter(status=Payment.Status.SUCCEEDED).count()
+
+    def get_revenue_uzs(self, obj):
+        total = obj.payments.filter(status=Payment.Status.SUCCEEDED).aggregate(
+            total=Sum('amount_uzs')
+        )['total']
+        return float(total or 0)
+
+
 class PaymentSerializer(serializers.ModelSerializer):
-    student_name = serializers.SerializerMethodField()
+    student_name     = serializers.SerializerMethodField()
     method_display   = serializers.CharField(source='get_method_display', read_only=True)
     provider_display = serializers.CharField(source='get_provider_display', read_only=True)
     status_display   = serializers.CharField(source='get_status_display', read_only=True)
+    package_name     = serializers.SerializerMethodField()
 
     class Meta:
         model  = Payment
         fields = [
-            'id', 'student_name',
+            'id', 'student_name', 'package_name',
             'credits_amount', 'amount_uzs', 'currency',
             'method', 'method_display',
             'provider', 'provider_display',
@@ -81,20 +113,23 @@ class PaymentSerializer(serializers.ModelSerializer):
             'last4', 'card_brand', 'card_holder_name',
             'created_at', 'updated_at',
         ]
-        read_only_fields = fields  # students never write through this serializer
+        read_only_fields = fields
 
     def get_student_name(self, obj):
         return obj.student.full_name or obj.student.phone_number
 
+    def get_package_name(self, obj):
+        return obj.package.name if obj.package else None
+
 
 # ============================================================
-# 2. VIEWS
+# 2. STUDENT-FACING VIEWS
 # ============================================================
 
 class PackageListView(APIView):
     """
     GET /api/payments/packages/
-    Public list of available credit packages.
+    Returns active credit packages from DB (replaces hardcoded frontend list).
     """
     permission_classes = [IsAuthenticated]
 
@@ -105,13 +140,12 @@ class PackageListView(APIView):
 class PurchaseCreditsView(APIView):
     """
     POST /api/payments/purchase/
-    Student buys a credit package. Body: { "package_id": 1|2|3 }
+    Student buys a credit package. Body: { "package_id": <id> }
 
-    If STRIPE_SECRET_KEY is configured: returns { "checkoutUrl": "..." } and the
-    browser is redirected to Stripe Checkout. Credits are granted by the webhook.
+    If STRIPE_SECRET_KEY is configured: returns { "checkoutUrl": "..." }.
+    Otherwise (dev/demo mode): credits are granted immediately.
 
-    If STRIPE_SECRET_KEY is not set (dev/demo mode): credits are granted immediately
-    and the response contains the payment record and new balance.
+    For PayMe/Click flows, use POST /api/payments/initiate/ instead.
     """
     permission_classes = [IsAuthenticated]
 
@@ -130,8 +164,9 @@ class PurchaseCreditsView(APIView):
         except (TypeError, ValueError):
             return Response({'error': 'package_id is required and must be an integer.'}, status=400)
 
-        package_info = PACKAGES.get(package_id)
-        if package_info is None:
+        try:
+            pkg = CreditPackage.objects.get(id=package_id, is_active=True)
+        except CreditPackage.DoesNotExist:
             return Response({'error': f'Invalid package_id: {package_id}'}, status=400)
 
         # ── Optional discount code ────────────────────────────────────────────
@@ -142,21 +177,18 @@ class PurchaseCreditsView(APIView):
         if discount_code_str:
             try:
                 amount_uzs_override, discount_code_obj = _apply_discount(
-                    discount_code_str, user, package_info['amount_uzs']
+                    discount_code_str, user, pkg.price_uzs
                 )
             except ValueError as exc:
                 return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         stripe_key = getattr(django_settings, 'STRIPE_SECRET_KEY', '')
         if stripe_key:
-            # --- Stripe checkout flow ---
-            # Discount stored in metadata; Stripe-level coupon support is a future enhancement.
             try:
                 payment, checkout_url = create_stripe_checkout_session(
-                    user=user,
-                    package_id=package_id,
+                    user, package_id, amount_uzs_override=amount_uzs_override
                 )
-                if discount_code_obj:
+                if discount_code_str:
                     payment.metadata = {**payment.metadata, 'discount_code': discount_code_str}
                     payment.save(update_fields=['metadata'])
             except ValueError as e:
@@ -183,17 +215,15 @@ class PurchaseCreditsView(APIView):
         # Record discount usage after a successful payment
         if discount_code_obj is not None:
             from marketing.models import DiscountCode, DiscountCodeUsage
-            original_amount = package_info['amount_uzs']
             DiscountCodeUsage.objects.create(
                 code=discount_code_obj,
                 user=user,
                 payment=payment,
-                discount_applied=original_amount - payment.amount_uzs,
+                discount_applied=pkg.price_uzs - payment.amount_uzs,
             )
             DiscountCode.objects.filter(pk=discount_code_obj.pk).update(
                 times_used=F('times_used') + 1
             )
-            # free_credits type: also grant the promised extra credits
             if discount_code_obj.discount_type == 'free_credits':
                 from accounts.models import StudentProfile
                 free = int(discount_code_obj.discount_value)
@@ -213,17 +243,124 @@ class PurchaseCreditsView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+class InitiatePaymentView(APIView):
+    """
+    POST /api/payments/initiate/
+    Body: { "package_id": <id>, "provider": "payme"|"click"|"stripe" }
+    Returns: { "checkout_url": "..." }
+
+    Creates a PENDING Payment record and returns the gateway checkout URL.
+    The gateway then calls our webhook after the user pays.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+
+        if not hasattr(user, 'student_profile'):
+            return Response({'error': 'Only students can purchase credits.'}, status=403)
+
+        try:
+            package_id = int(request.data.get('package_id'))
+        except (TypeError, ValueError):
+            return Response({'error': 'package_id is required.'}, status=400)
+
+        # ── Discount code support ─────────────────────────────────────────────
+        discount_code_str = (request.data.get('discount_code') or '').strip()
+        amount_uzs_override = None
+
+        if discount_code_str:
+            try:
+                # Need to lookup package first for price
+                pkg_check = CreditPackage.objects.get(id=package_id, is_active=True)
+                amount_uzs_override, _ = _apply_discount(discount_code_str, user, pkg_check.price_uzs)
+            except (CreditPackage.DoesNotExist, ValueError) as exc:
+                return Response({'error': str(exc)}, status=400)
+
+        provider = (request.data.get('provider') or 'payme').lower()
+        if provider not in ('payme', 'click', 'stripe'):
+            return Response({'error': 'Invalid provider. Choose: payme, click, stripe.'}, status=400)
+
+        try:
+            pkg = CreditPackage.objects.get(id=package_id, is_active=True)
+        except CreditPackage.DoesNotExist:
+            return Response({'error': 'Package not found or unavailable.'}, status=404)
+
+        # Stripe: delegate to existing flow
+        if provider == 'stripe':
+            stripe_key = getattr(django_settings, 'STRIPE_SECRET_KEY', '')
+            if not stripe_key:
+                return Response({'error': 'Stripe is not configured.'}, status=503)
+            try:
+                payment, checkout_url = create_stripe_checkout_session(
+                    user, package_id, amount_uzs_override=amount_uzs_override
+                )
+                if discount_code_str:
+                    payment.metadata = {**payment.metadata, 'discount_code': discount_code_str}
+                    payment.save(update_fields=['metadata'])
+            except Exception:
+                return Response({'error': 'Could not create Stripe session.'}, status=500)
+            return Response({'checkout_url': checkout_url}, status=201)
+
+        # Create PENDING payment record for PayMe / Click
+        final_amount_uzs = amount_uzs_override if amount_uzs_override is not None else pkg.price_uzs
+        metadata = {'discount_code': discount_code_str} if discount_code_str else {}
+
+        provider_choice = Payment.Provider.PAYME if provider == 'payme' else Payment.Provider.CLICK
+        payment = Payment.objects.create(
+            student=user,
+            package=pkg,
+            credits_amount=pkg.credits,
+            amount_uzs=final_amount_uzs,
+            method=Payment.Method.CARD,
+            provider=provider_choice,
+            status=Payment.Status.PENDING,
+            metadata=metadata,
+        )
+
+        frontend_url = getattr(django_settings, 'FRONTEND_URL', 'http://localhost:5173').rstrip('/')
+
+        if provider == 'payme':
+            payme_cfg = getattr(django_settings, 'PAYME', {})
+            payme_id = payme_cfg.get('PAYME_ID', '')
+            amount_tiyins = int(final_amount_uzs) * 100  # UZS → tiyins
+            checkout_url = (
+                f"https://checkout.paycom.uz/{payme_id}"
+                f"?account[order_id]={payment.id}"
+                f"&amount={amount_tiyins}"
+            )
+        else:  # click
+            click_cfg = getattr(django_settings, 'CLICK', {})
+            service_id  = click_cfg.get('CLICK_SERVICE_ID', '')
+            merchant_id = click_cfg.get('CLICK_MERCHANT_ID', '')
+            import urllib.parse
+            return_url = f"{frontend_url}/buy-credits?payment=success"
+            checkout_url = (
+                f"https://my.click.uz/services/pay"
+                f"?service_id={service_id}"
+                f"&merchant_id={merchant_id}"
+                f"&amount={int(final_amount_uzs)}"
+                f"&transaction_param={payment.id}"
+                f"&return_url={urllib.parse.quote(return_url, safe='')}"
+            )
+
+        return Response({'checkout_url': checkout_url}, status=201)
+
+
+# ============================================================
+# 3. STRIPE WEBHOOK
+# ============================================================
+
 class StripeWebhookView(APIView):
     """
     POST /api/payments/webhook/stripe/
     Receives Stripe webhook events. Authenticated by Stripe signature — no JWT.
-    Grants credits and marks the payment SUCCEEDED on checkout.session.completed.
     """
     authentication_classes = []
     permission_classes = []
 
     def post(self, request):
-        payload = request.body  # raw bytes — must be read before request.data
+        payload = request.body
         sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
         webhook_secret = getattr(django_settings, 'STRIPE_WEBHOOK_SECRET', '')
 
@@ -249,31 +386,24 @@ class StripeWebhookView(APIView):
         stripe_session_id = session.get('id')
 
         if not payment_id:
-            return  # No reference — skip
+            return
 
         try:
-            payment = Payment.objects.get(id=payment_id, status=Payment.Status.PENDING)
+            payment = Payment.objects.get(id=payment_id)
         except Payment.DoesNotExist:
-            return  # Already processed or not found — idempotent
+            return
 
-        from accounts.models import StudentProfile  # avoid circular import
-        with transaction.atomic():
-            profile, _ = StudentProfile.objects.select_for_update().get_or_create(
-                user=payment.student
-            )
-            profile.lesson_credits = profile.lesson_credits + payment.credits_amount
-            profile.save(update_fields=['lesson_credits'])
+        payment.receipt_id = stripe_session_id
+        payment.save(update_fields=['receipt_id'])
+        grant_credits_for_payment(payment)
 
-            payment.status = Payment.Status.SUCCEEDED
-            payment.receipt_id = stripe_session_id
-            payment.save(update_fields=['status', 'receipt_id', 'updated_at'])
 
+# ============================================================
+# 4. PAYMENT HISTORY
+# ============================================================
 
 class PaymentListView(generics.ListAPIView):
-    """
-    GET /api/payments/
-    Returns the authenticated student's own payment history (newest first).
-    """
+    """GET /api/payments/  — the authenticated student's own payment history."""
     serializer_class   = PaymentSerializer
     permission_classes = [IsAuthenticated]
 
@@ -282,10 +412,7 @@ class PaymentListView(generics.ListAPIView):
 
 
 class PaymentDetailView(generics.RetrieveAPIView):
-    """
-    GET /api/payments/<id>/
-    Returns a single payment – only if it belongs to the authenticated student.
-    """
+    """GET /api/payments/<id>/  — single payment belonging to the authenticated student."""
     serializer_class   = PaymentSerializer
     permission_classes = [IsAuthenticated]
 
@@ -293,16 +420,69 @@ class PaymentDetailView(generics.RetrieveAPIView):
         return Payment.objects.filter(student=self.request.user)
 
 
-# ============================================================================
-# SUBSCRIPTION PACKAGES  (the new Package / StudentPackage models)
-# ============================================================================
-from .models import Package, StudentPackage
+# ============================================================
+# 5. ADMIN — CREDIT PACKAGE CRUD
+# ============================================================
 
+class CreditPackageAdminListView(APIView):
+    """
+    GET  /api/payments/admin/packages/  — list all packages (admin only, includes inactive)
+    POST /api/payments/admin/packages/  — create a new package
+    """
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def get(self, request):
+        pkgs = CreditPackage.objects.all().order_by('sort_order', 'price_uzs')
+        return Response(CreditPackageAdminSerializer(pkgs, many=True).data)
+
+    def post(self, request):
+        serializer = CreditPackageAdminSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CreditPackageAdminDetailView(APIView):
+    """
+    PATCH  /api/payments/admin/packages/<id>/  — update
+    DELETE /api/payments/admin/packages/<id>/  — deactivate (soft-delete)
+    """
+    permission_classes = [IsAuthenticated, IsAdminRole]
+
+    def _get_pkg(self, pk):
+        try:
+            return CreditPackage.objects.get(pk=pk)
+        except CreditPackage.DoesNotExist:
+            return None
+
+    def patch(self, request, pk):
+        pkg = self._get_pkg(pk)
+        if not pkg:
+            return Response({'error': 'Package not found.'}, status=404)
+        serializer = CreditPackageAdminSerializer(pkg, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=400)
+
+    def delete(self, request, pk):
+        pkg = self._get_pkg(pk)
+        if not pkg:
+            return Response({'error': 'Package not found.'}, status=404)
+        pkg.is_active = False
+        pkg.save(update_fields=['is_active', 'updated_at'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ============================================================
+# 6. LEGACY — LESSON PACKAGE SYSTEM (kept for backward-compat)
+# ============================================================
 
 class LessonPackageListView(generics.ListAPIView):
     """
     GET /api/payments/lesson-packages/
-    Lists all active lesson packages (bundles of N lessons, not credit packages).
+    Lists all active lesson packages (legacy — not connected to credit system).
     """
     permission_classes = [IsAuthenticated]
 
@@ -310,12 +490,12 @@ class LessonPackageListView(generics.ListAPIView):
         packages = Package.objects.filter(is_active=True).order_by('price')
         return Response([
             {
-                'id':             p.id,
-                'title':          p.title,
-                'lessons_count':  p.lessons_count,
-                'price':          str(p.price),
-                'currency':       p.currency,
-                'validity_days':  p.validity_days,
+                'id':            p.id,
+                'title':         p.title,
+                'lessons_count': p.lessons_count,
+                'price':         str(p.price),
+                'currency':      p.currency,
+                'validity_days': p.validity_days,
             }
             for p in packages
         ])
@@ -323,8 +503,8 @@ class LessonPackageListView(generics.ListAPIView):
 
 class StudentPackageView(APIView):
     """
-    GET  /api/payments/my-packages/    — student's active packages
-    POST /api/payments/my-packages/    — purchase a package { "package_id": <id> }
+    GET  /api/payments/my-packages/    — student's active lesson packages (legacy)
+    POST /api/payments/my-packages/    — purchase a lesson package (legacy)
     """
     permission_classes = [IsAuthenticated]
 

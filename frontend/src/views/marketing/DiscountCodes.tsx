@@ -331,7 +331,10 @@ const CodeRow = memo(function CodeRow({ code: c, onEdit, onDelete, onToggle }: R
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function DiscountCodes() {
+  usePageTitle('Discount Codes');
   const qc = useQueryClient()
   const [modalData, setModalData] = useState<Partial<DiscountCode> | null | false>(false)
   const [filter, setFilter] = useState<'all' | 'active' | 'expired' | 'inactive'>('all')

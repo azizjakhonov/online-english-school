@@ -6,7 +6,7 @@ from .models import LessonProgress
 class LessonProgressAdmin(admin.ModelAdmin):
     list_display = ("lesson", "speaking", "grammar", "vocabulary", "listening", "created_at")
     search_fields = (
-        "lesson__teacher__user__username",
-        "lesson__student__user__username",
+        "lesson__teacher__phone_number",
+        "lesson__student__phone_number",
     )
     ordering = ("-created_at",)

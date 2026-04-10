@@ -7,7 +7,10 @@ interface ApiError {
   response?: { data?: { error?: string } };
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherRegisterPage() {
+  usePageTitle('Teacher Registration');
   const navigate = useNavigate();
   const [phoneSuffix, setPhoneSuffix] = useState('');
   const [loading, setLoading] = useState(false);

@@ -1,8 +1,8 @@
 import axios from 'axios';
 
-const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-export const API_BASE_URL = (configuredApiBaseUrl && configuredApiBaseUrl.length > 0
-  ? configuredApiBaseUrl
+const _rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+export const API_BASE_URL = (_rawApiBaseUrl !== undefined
+  ? _rawApiBaseUrl.trim()
   : 'https://api.allright.uz').replace(/\/+$/, '');
 
 export function resolveApiUrl(pathOrUrl?: string): string {

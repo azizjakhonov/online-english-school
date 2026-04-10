@@ -1,114 +1,124 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  CreditCard, Wallet, Check, ArrowLeft,
-  Loader2, ShieldCheck, CheckCircle2, XCircle, Tag,
+  Wallet, Check, Loader2, ShieldCheck, CheckCircle2,
+  XCircle, Tag, ArrowLeft, ArrowRight, Package, CreditCard,
+  Zap, Star,
 } from 'lucide-react';
 import api from '../../lib/api';
 import { formatUZS } from '../../lib/formatCurrency';
+import { usePageTitle } from '../../lib/usePageTitle';
+import { useAuth } from '../auth/AuthContext';
+import Avatar from '../../components/Avatar';
+import clickLogoImg from '../../../Click-01.png';
+import paymeLogoImg from '../../../Paymeuz_logo.png';
 
-interface DiscountResult {
-  code: string
-  discount_type: 'percent' | 'fixed' | 'free_credits'
-  discount_value: number
-  discount_amount: number
-  free_credits: number
-}
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-// --- TYPES ---
 interface CreditPackage {
   id: number;
+  name: string;
   credits: number;
   price_uzs: number;
-  label?: string;
-  popular?: boolean;
+  is_popular: boolean;
   features: string[];
+  validity_label: string;
+  discount_percent: number;
+  price_per_credit_uzs: number;
 }
 
-// Prices expressed in UZS (matches backend PACKAGES dict in payments/services.py)
-const PACKAGES: CreditPackage[] = [
-  {
-    id: 1,
-    credits: 5,
-    price_uzs: 500_000,
-    label: 'Starter',
-    features: ['Valid for 30 days', 'Basic Support'],
-  },
-  {
-    id: 2,
-    credits: 20,
-    price_uzs: 1_800_000,
-    popular: true,
-    features: ['Save 10%', 'Valid for 90 days', 'Priority Support'],
-  },
-  {
-    id: 3,
-    credits: 50,
-    price_uzs: 4_000_000,
-    label: 'Pro',
-    features: ['Save 20%', 'Never Expires', 'VIP Support', 'Free Group Class'],
-  },
-];
+interface DiscountResult {
+  code: string;
+  discount_type: 'percent' | 'fixed' | 'free_credits';
+  discount_value: number;
+  discount_amount: number;
+  free_credits: number;
+}
+
+type PaymentProvider = 'payme' | 'click' | 'stripe';
+
+// ─── Stripe Logo ──────────────────────────────────────────────────────────────
+
+function StripeLogo() {
+  return (
+    <svg viewBox="0 0 60 25" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ height: 22, width: 'auto' }}>
+      <text x="0" y="21" fontFamily="Arial Black, Arial, sans-serif" fontWeight="900" fontSize="24" fill="#635BFF">stripe</text>
+    </svg>
+  );
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BuyCredits() {
+  usePageTitle('Buy Credits');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user } = useAuth();
 
-  const [selectedPkg, setSelectedPkg] = useState<number>(2);
+  const [packages, setPackages] = useState<CreditPackage[]>([]);
+  const [pkgsLoading, setPkgsLoading] = useState(true);
+  const [selectedPkg, setSelectedPkg] = useState<number>(0);
+  const [provider, setProvider] = useState<PaymentProvider>('payme');
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentBalance, setCurrentBalance] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [lastPurchased, setLastPurchased] = useState(0);
   const [paymentCancelled, setPaymentCancelled] = useState(false);
+
   const [promoInput, setPromoInput] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState('');
   const [appliedDiscount, setAppliedDiscount] = useState<DiscountResult | null>(null);
 
-  // Fetch balance on mount, and handle Stripe redirect callbacks (?payment=success/cancel)
+  useEffect(() => {
+    api.get('/api/payments/packages/')
+      .then(res => {
+        const pkgs: CreditPackage[] = res.data;
+        setPackages(pkgs);
+        const popular = pkgs.find(p => p.is_popular);
+        setSelectedPkg(popular?.id ?? pkgs[0]?.id ?? 0);
+      })
+      .catch(() => setPackages([]))
+      .finally(() => setPkgsLoading(false));
+  }, []);
+
+  const selectedPackage = packages.find(p => p.id === selectedPkg);
+  const basePrice = selectedPackage?.price_uzs ?? 0;
+  const discountedPrice = appliedDiscount
+    ? Math.max(0, basePrice - appliedDiscount.discount_amount)
+    : basePrice;
+
   useEffect(() => {
     const paymentParam = searchParams.get('payment');
-
     const init = async () => {
       try {
-        const response = await api.get('/api/me/');
-        const sp = response.data.student_profile;
+        const res = await api.get('/api/me/');
+        const sp = res.data.student_profile;
         setCurrentBalance(sp?.available_credits ?? sp?.lesson_credits ?? 0);
-      } catch (err) {
-        console.error('Failed to fetch balance', err);
-      } finally {
-        setIsLoading(false);
-      }
+      } catch { /* ignore */ }
+      finally { setIsLoading(false); }
 
       if (paymentParam === 'success') {
-        // Retrieve package info stored before redirecting to Stripe
-        const stored = sessionStorage.getItem('pendingPurchasePkg');
-        const storedPkg = stored ? JSON.parse(stored) : null;
         sessionStorage.removeItem('pendingPurchasePkg');
-        setLastPurchased(storedPkg?.credits ?? 0);
         setShowModal(true);
       } else if (paymentParam === 'cancel') {
         setPaymentCancelled(true);
       }
     };
-
     init();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const handleApplyPromo = useCallback(async () => {
     const code = promoInput.trim().toUpperCase();
     if (!code) return;
-    const pkg = PACKAGES.find(p => p.id === selectedPkg);
+    const pkg = packages.find(p => p.id === selectedPkg);
     if (!pkg) return;
     setPromoLoading(true);
     setPromoError('');
     setAppliedDiscount(null);
     try {
-      const res = await api.post('/api/marketing/discount-codes/validate/', {
-        code,
-        amount: pkg.price_uzs,
-      });
+      const res = await api.post('/api/marketing/discount-codes/validate/', { code, amount: pkg.price_uzs });
       setAppliedDiscount(res.data);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -116,93 +126,139 @@ export default function BuyCredits() {
     } finally {
       setPromoLoading(false);
     }
-  }, [promoInput, selectedPkg]);
+  }, [promoInput, selectedPkg, packages]);
 
   const handlePurchase = async () => {
+    const pkg = packages.find(p => p.id === selectedPkg);
+    if (!pkg) return;
     setIsProcessing(true);
     setPaymentCancelled(false);
     try {
-      const pkg = PACKAGES.find(p => p.id === selectedPkg);
-      if (!pkg) return;
-
-      const body: Record<string, unknown> = { package_id: pkg.id };
+      const body: Record<string, unknown> = { package_id: pkg.id, provider };
       if (appliedDiscount) body.discount_code = appliedDiscount.code;
 
-      const response = await api.post('/api/payments/purchase/', body);
+      const response = await api.post('/api/payments/initiate/', body);
+      const checkoutUrl = response.data.checkout_url as string;
 
-      if (response.data.checkoutUrl) {
-        // Stripe flow: save package info for the return trip, then redirect
-        sessionStorage.setItem('pendingPurchasePkg', JSON.stringify({ id: pkg.id, credits: pkg.credits }));
-        window.location.href = response.data.checkoutUrl;
-        return; // page is leaving — don't reset isProcessing
+      if (!checkoutUrl) {
+        const meRes = await api.get('/api/me/');
+        const sp = meRes.data.student_profile;
+        setCurrentBalance(sp?.available_credits ?? sp?.lesson_credits ?? response.data.new_balance ?? 0);
+        setShowModal(true);
+        return;
       }
-
-      // Demo / test flow: credits granted immediately
-      const meRes = await api.get('/api/me/');
-      const sp = meRes.data.student_profile;
-      setCurrentBalance(sp?.available_credits ?? sp?.lesson_credits ?? response.data.new_balance ?? 0);
-      setLastPurchased(pkg.credits);
-      setShowModal(true);
+      sessionStorage.setItem('pendingPurchasePkg', JSON.stringify({ id: pkg.id, credits: pkg.credits }));
+      window.location.href = checkoutUrl;
     } catch (err: unknown) {
-      let errorMsg = 'Payment failed. Please try again.';
-      if (err && typeof err === 'object' && 'response' in err) {
-        const apiError = err as { response?: { data?: { error?: string } } };
-        if (apiError.response?.data?.error) {
-          errorMsg = apiError.response.data.error;
-        }
-      }
-      alert(errorMsg);
+      let msg = 'Payment failed. Please try again.';
+      const e = err as { response?: { data?: { error?: string } } };
+      if (e?.response?.data?.error) msg = e.response.data.error;
+      alert(msg);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  if (isLoading) {
+  if (isLoading || pkgsLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="animate-spin text-blue-600" size={36} />
+      <div style={{ minHeight: '100vh', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Loader2 className="animate-spin" size={32} style={{ color: '#2563eb' }} />
       </div>
     );
   }
 
-  const selectedPackage = PACKAGES.find(p => p.id === selectedPkg);
+  const providers: { id: PaymentProvider; label: string; sub: string; logo: React.ReactNode }[] = [
+    {
+      id: 'payme', label: 'PayMe', sub: 'Wallet or linked Uzcard / Humo',
+      logo: <img src={paymeLogoImg} alt="PayMe" style={{ height: 32, width: 'auto', objectFit: 'contain', display: 'block' }} />,
+    },
+    {
+      id: 'click', label: 'Click', sub: 'Instant via Click mobile app',
+      logo: <img src={clickLogoImg} alt="Click" style={{ height: 32, width: 'auto', objectFit: 'contain', display: 'block' }} />,
+    },
+    {
+      id: 'stripe', label: 'Stripe', sub: 'Visa, Mastercard, Google Pay, Apple Pay',
+      logo: <StripeLogo />,
+    },
+  ];
+
+  const pkgDiscountAmount = selectedPackage && selectedPackage.discount_percent > 0
+    ? Math.round(basePrice / (1 - selectedPackage.discount_percent / 100) - basePrice)
+    : 0;
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-4 flex items-center justify-between sticky top-0 z-20">
+    <div style={{
+      minHeight: '100vh',
+      background: '#f1f5f9',
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+      color: '#111827',
+      display: 'flex',
+      flexDirection: 'column',
+    }}>
+
+      {/* ── Top Bar ──────────────────────────────────────────────────────── */}
+      <header style={{
+        background: '#ffffff',
+        borderBottom: '1px solid #e5e7eb',
+        height: 64,
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 24px',
+        position: 'sticky',
+        top: 0,
+        zIndex: 30,
+        gap: 12,
+      }}>
         <button
-          onClick={() => navigate('/dashboard')}
-          className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-          title="Back to dashboard"
+          onClick={() => navigate(-1)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 32, height: 32,
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: '#374151', borderRadius: 8,
+            padding: 0, flexShrink: 0,
+          }}
         >
-          <ArrowLeft size={20} />
+          <ArrowLeft size={18} />
         </button>
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-100 rounded-xl text-blue-600 shrink-0">
-            <Wallet size={20} />
-          </div>
-          <div>
-            <h1 className="text-xl font-black text-slate-900">Buy Credits</h1>
-            <p className="text-xs text-slate-500 font-medium">Balance: {currentBalance} credits</p>
-          </div>
-          <div className="hidden sm:flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl">
-            <span className="text-sm font-bold text-slate-700">{currentBalance}</span>
-            <span className="text-xs text-slate-500 font-medium">Credits</span>
-          </div>
+
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#111827' }}>Buy Credits</div>
+          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>Top up your balance and book lessons</div>
         </div>
+
+        {/* Balance chip */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
+          borderRadius: 20,
+          padding: '7px 14px', flexShrink: 0,
+        }}>
+          <Wallet size={13} style={{ color: 'rgba(255,255,255,0.8)' }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>
+            {currentBalance} Credits
+          </span>
+        </div>
+
+        <Avatar url={user?.profile_picture_url} name={user?.full_name ?? 'User'} size={36} />
       </header>
 
-      {/* Cancellation notice */}
+      {/* ── Cancelled Notice ─────────────────────────────────────────────── */}
       {paymentCancelled && (
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-5">
-          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-            <XCircle size={18} className="text-amber-500 shrink-0" />
-            <p className="text-sm font-medium text-amber-700 flex-1">
-              Payment was cancelled — no charge was made. Choose a package and try again when you're ready.
-            </p>
+        <div style={{ margin: '16px 24px 0' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: '#fffbeb', border: '1px solid #fde68a',
+            borderLeft: '4px solid #f59e0b', borderRadius: 10,
+            padding: '11px 16px',
+          }}>
+            <XCircle size={15} style={{ color: '#d97706', flexShrink: 0 }} />
+            <span style={{ fontSize: 13, fontWeight: 500, color: '#92400e', flex: 1 }}>
+              Payment was cancelled — no charge was made.
+            </span>
             <button
               onClick={() => setPaymentCancelled(false)}
-              className="text-amber-500 hover:text-amber-700 text-lg leading-none font-bold"
+              style={{ background: 'none', border: 'none', color: '#d97706', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 0 }}
             >
               ×
             </button>
@@ -210,186 +266,564 @@ export default function BuyCredits() {
         </div>
       )}
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* ── Main ─────────────────────────────────────────────────────────── */}
+      <main style={{
+        padding: '20px 24px 40px',
+        display: 'grid',
+        gridTemplateColumns: '1fr 360px',
+        gap: 16,
+        alignItems: 'start',
+        flex: 1,
+        maxWidth: 1100,
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box',
+      }}>
 
-        {/* Left: Package Selection */}
-        <div className="lg:col-span-2 space-y-6">
-          <div>
-            <h2 className="text-lg font-black text-slate-900">Choose a package</h2>
-            <p className="text-sm text-slate-500 font-medium mt-0.5">Fits your learning goals</p>
+        {/* ── LEFT COLUMN ───────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* ── Package Selection ─────────────────────────────────────────── */}
+          <div style={{
+            background: '#ffffff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 16,
+            overflow: 'hidden',
+          }}>
+            {/* Section header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #f3f4f6',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <div style={{
+                width: 36, height: 36,
+                background: '#eff6ff',
+                borderRadius: 10,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <Package size={16} style={{ color: '#2563eb' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>Choose a Package</div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>Select the credit bundle that fits your needs</div>
+              </div>
+            </div>
+
+            <div style={{ padding: '18px 20px' }}>
+              {packages.length === 0 ? (
+                <p style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: '32px 0', margin: 0 }}>
+                  No packages available.
+                </p>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                  {packages.map(pkg => {
+                    const sel = selectedPkg === pkg.id;
+                    return (
+                      <div
+                        key={pkg.id}
+                        onClick={() => {
+                          setSelectedPkg(pkg.id);
+                          setAppliedDiscount(null);
+                          setPromoInput('');
+                          setPromoError('');
+                        }}
+                        style={{
+                          position: 'relative',
+                          border: sel ? '2px solid #2563eb' : '1.5px solid #e5e7eb',
+                          borderRadius: 14,
+                          cursor: 'pointer',
+                          background: sel ? '#eff6ff' : '#fff',
+                          overflow: 'hidden',
+                          transition: 'all 0.15s',
+                          boxShadow: sel ? '0 0 0 3px rgba(37,99,235,0.1)' : '0 1px 3px rgba(0,0,0,0.04)',
+                        }}
+                      >
+                        {/* Popular strip */}
+                        {pkg.is_popular && (
+                          <div style={{
+                            background: '#2563eb',
+                            color: '#fff',
+                            fontSize: 10, fontWeight: 700,
+                            textAlign: 'center',
+                            padding: '5px 0',
+                            letterSpacing: '0.07em',
+                            textTransform: 'uppercase',
+                          }}>
+                            ★ Most Popular
+                          </div>
+                        )}
+
+                        {/* Selected check */}
+                        {sel && (
+                          <div style={{
+                            position: 'absolute',
+                            top: pkg.is_popular ? 34 : 10,
+                            right: 10,
+                            width: 20, height: 20,
+                            background: '#2563eb', borderRadius: '50%',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: '0 2px 6px rgba(37,99,235,0.4)',
+                          }}>
+                            <Check size={11} style={{ color: '#fff', strokeWidth: 3 }} />
+                          </div>
+                        )}
+
+                        <div style={{ padding: '14px 16px 18px' }}>
+                          {/* Name + discount badge */}
+                          <div style={{
+                            display: 'flex', justifyContent: 'space-between',
+                            alignItems: 'flex-start', marginBottom: 10,
+                            paddingRight: sel ? 24 : 0,
+                          }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              {pkg.name}
+                            </span>
+                            {pkg.discount_percent > 0 && (
+                              <span style={{
+                                background: '#dcfce7', color: '#15803d',
+                                fontSize: 10, fontWeight: 700,
+                                padding: '2px 6px', borderRadius: 20,
+                                whiteSpace: 'nowrap', flexShrink: 0,
+                              }}>
+                                -{pkg.discount_percent}%
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Credits hero */}
+                          <div style={{ lineHeight: 1, marginBottom: 6 }}>
+                            <span style={{
+                              fontSize: 44, fontWeight: 900,
+                              color: sel ? '#1d4ed8' : '#111827',
+                              letterSpacing: '-0.04em',
+                            }}>
+                              {pkg.credits}
+                            </span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#9ca3af', marginLeft: 4 }}>
+                              credits
+                            </span>
+                          </div>
+
+                          {/* Price */}
+                          <div style={{
+                            fontSize: 14, fontWeight: 800,
+                            color: sel ? '#2563eb' : '#374151',
+                            marginBottom: pkg.features.length > 0 ? 14 : 0,
+                          }}>
+                            {formatUZS(pkg.price_uzs)}
+                          </div>
+
+                          {/* Features */}
+                          {pkg.features.length > 0 && (
+                            <div style={{
+                              borderTop: '1px solid #e5e7eb',
+                              paddingTop: 12,
+                              display: 'flex', flexDirection: 'column', gap: 7,
+                            }}>
+                              {pkg.features.map((f, i) => (
+                                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                                  <div style={{
+                                    width: 15, height: 15,
+                                    background: sel ? '#2563eb' : '#22c55e',
+                                    borderRadius: '50%',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    flexShrink: 0,
+                                  }}>
+                                    <Check size={8} style={{ color: '#fff', strokeWidth: 3.5 }} />
+                                  </div>
+                                  <span style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.4 }}>{f}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {PACKAGES.map(pkg => (
-              <div
-                key={pkg.id}
-                onClick={() => { setSelectedPkg(pkg.id); setAppliedDiscount(null); setPromoInput(''); setPromoError(''); }}
-                className={`relative cursor-pointer rounded-2xl border-2 p-5 bg-white shadow-sm transition-all ${selectedPkg === pkg.id ? 'border-blue-600 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-300'}`}
-              >
-                {pkg.popular && (
-                  <div className="absolute -top-2.5 right-4 bg-blue-600 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                    Popular
-                  </div>
-                )}
-
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{pkg.label || 'Standard'}</span>
-                    <div className="text-2xl font-black text-slate-900 mt-1">{pkg.credits}</div>
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Credits</div>
-                  </div>
-                  <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedPkg === pkg.id ? 'border-blue-600 bg-blue-600' : 'border-slate-200'}`}>
-                    {selectedPkg === pkg.id && <Check size={14} className="text-white stroke-[3]" />}
-                  </div>
-                </div>
-
-                <div className="space-y-2 mb-5">
-                  {pkg.features.map((feat, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-sm text-slate-600 font-medium">
-                      <div className="w-4 h-4 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                        <Check size={10} className="text-emerald-600 stroke-[3]" />
-                      </div>
-                      {feat}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="border-t border-slate-100 pt-4 flex items-baseline justify-between">
-                  <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">
-                    {formatUZS(Math.round(pkg.price_uzs / pkg.credits))} / credit
-                  </span>
-                  <span className="text-lg font-black text-blue-600">{formatUZS(pkg.price_uzs)}</span>
-                </div>
+          {/* ── Payment Method ───────────────────────────────────────────── */}
+          <div style={{
+            background: '#ffffff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 16,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #f3f4f6',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <div style={{
+                width: 36, height: 36,
+                background: '#eff6ff',
+                borderRadius: 10,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <CreditCard size={16} style={{ color: '#2563eb' }} />
               </div>
-            ))}
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>Payment Method</div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 1 }}>Choose how you'd like to pay</div>
+              </div>
+            </div>
+
+            <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {providers.map(p => {
+                const active = provider === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => setProvider(p.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 14,
+                      padding: '12px 16px',
+                      borderRadius: 12,
+                      cursor: 'pointer',
+                      background: active ? '#eff6ff' : '#fafafa',
+                      border: active ? '1.5px solid #2563eb' : '1.5px solid #e5e7eb',
+                      transition: 'all 0.15s',
+                      textAlign: 'left',
+                      width: '100%',
+                    }}
+                  >
+                    {/* Logo box */}
+                    <div style={{
+                      width: 88, height: 46, flexShrink: 0,
+                      background: '#fff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 9,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      padding: '5px 12px',
+                      boxSizing: 'border-box',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      overflow: 'hidden',
+                    }}>
+                      {p.logo}
+                    </div>
+
+                    {/* Label + desc */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 14, fontWeight: 700,
+                        color: active ? '#1d4ed8' : '#111827',
+                        marginBottom: 2,
+                      }}>
+                        {p.label}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#9ca3af', lineHeight: 1.4 }}>{p.sub}</div>
+                    </div>
+
+                    {/* Radio */}
+                    <div style={{
+                      width: 18, height: 18, flexShrink: 0,
+                      borderRadius: '50%',
+                      border: active ? '2px solid #2563eb' : '2px solid #d1d5db',
+                      background: active ? '#2563eb' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.15s',
+                    }}>
+                      {active && (
+                        <div style={{ width: 6, height: 6, background: '#fff', borderRadius: '50%' }} />
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Why Credits? promo banner ─────────────────────────────────── */}
+          <div style={{
+            background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
+            borderRadius: 16,
+            padding: '20px 24px',
+            display: 'flex', alignItems: 'center', gap: 16,
+          }}>
+            <div style={{
+              width: 44, height: 44, background: 'rgba(255,255,255,0.15)',
+              borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <Zap size={22} style={{ color: '#fbbf24' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+                1 Credit = 1 Lesson
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5 }}>
+                Credits never expire. Use them to book lessons with any teacher on the platform.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 3 }}>
+              {[1, 2, 3].map(i => <Star key={i} size={14} style={{ color: '#fbbf24' }} fill="#fbbf24" />)}
+            </div>
           </div>
         </div>
 
-        {/* Right: Summary Card */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sticky top-24">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 bg-blue-100 rounded-xl text-blue-600 shrink-0">
-                <ShieldCheck size={20} />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Order Summary</h3>
-                <p className="text-xs text-slate-500 font-medium">Secure checkout</p>
-              </div>
-            </div>
+        {/* ── RIGHT COLUMN — Order Summary ─────────────────────────────── */}
+        <aside style={{
+          background: '#ffffff',
+          border: '1px solid #e5e7eb',
+          borderRadius: 16,
+          overflow: 'hidden',
+          position: 'sticky',
+          top: 80,
+        }}>
+          {/* Header */}
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>Order Summary</div>
+          </div>
 
-            <div className="space-y-4 mb-5">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Package</span>
-                <span className="text-base font-black text-slate-900">{selectedPackage?.credits} Credits</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Subtotal</span>
-                <span className="text-base font-black text-slate-900">{formatUZS(selectedPackage?.price_uzs)}</span>
-              </div>
-              {appliedDiscount && appliedDiscount.discount_amount > 0 && (
-                <div className="flex justify-between items-center text-emerald-600">
-                  <span className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1">
-                    <Tag size={11} /> {appliedDiscount.code}
-                  </span>
-                  <span className="text-sm font-bold">−{formatUZS(appliedDiscount.discount_amount)}</span>
-                </div>
-              )}
-              {appliedDiscount && appliedDiscount.free_credits > 0 && (
-                <div className="flex justify-between items-center text-emerald-600">
-                  <span className="text-xs font-semibold uppercase tracking-wider">Free Credits</span>
-                  <span className="text-sm font-bold">+{appliedDiscount.free_credits}</span>
-                </div>
-              )}
-              <div className="border-t border-slate-100 pt-3 flex justify-between items-center">
-                <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Total Due</span>
-                <span className="text-xl font-black text-blue-600">
-                  {formatUZS(appliedDiscount ? Math.max(0, (selectedPackage?.price_uzs ?? 0) - appliedDiscount.discount_amount) : selectedPackage?.price_uzs)}
-                </span>
-              </div>
-            </div>
+          <div style={{ padding: '18px 20px 22px' }}>
 
-            {/* Promo code input */}
-            <div className="mb-4 space-y-2">
+            {/* Selected package card */}
+            {selectedPackage ? (
+              <div style={{
+                background: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)',
+                borderRadius: 12,
+                padding: '16px 18px',
+                marginBottom: 18,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}>
+                <div>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700,
+                    color: 'rgba(255,255,255,0.55)',
+                    textTransform: 'uppercase', letterSpacing: '0.08em',
+                    marginBottom: 4,
+                  }}>
+                    {selectedPackage.name}
+                  </div>
+                  <div style={{ lineHeight: 1 }}>
+                    <span style={{ fontSize: 34, fontWeight: 900, color: '#fff', letterSpacing: '-0.03em' }}>
+                      {selectedPackage.credits}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.6)', marginLeft: 5 }}>
+                      credits
+                    </span>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
+                    {formatUZS(selectedPackage.price_per_credit_uzs)}/cr
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#fff' }}>
+                    {formatUZS(selectedPackage.price_uzs)}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                background: '#f9fafb', borderRadius: 12, padding: '16px 18px',
+                marginBottom: 18, fontSize: 13, color: '#9ca3af', textAlign: 'center',
+              }}>
+                No package selected
+              </div>
+            )}
+
+            {/* Discounts */}
+            {(pkgDiscountAmount > 0 || (appliedDiscount && appliedDiscount.discount_amount > 0)) && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
+                {pkgDiscountAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 500 }}>Package Discount</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>
+                      −{formatUZS(pkgDiscountAmount)}
+                    </span>
+                  </div>
+                )}
+                {appliedDiscount && appliedDiscount.discount_amount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 500 }}>
+                      Promo ({appliedDiscount.code})
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>
+                      −{formatUZS(appliedDiscount.discount_amount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Promo Code */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: '#374151',
+                letterSpacing: '0.05em', textTransform: 'uppercase',
+                display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8,
+              }}>
+                <Tag size={11} style={{ color: '#2563eb' }} />
+                Promo Code
+              </div>
+
               {appliedDiscount ? (
-                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
-                  <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1.5">
-                    <CheckCircle2 size={13} /> Code <strong>{appliedDiscount.code}</strong> applied
-                  </span>
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: '#f0fdf4', border: '1px solid #bbf7d0',
+                  borderRadius: 9, padding: '9px 12px',
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#16a34a' }}>✓ {appliedDiscount.code}</span>
                   <button
                     onClick={() => { setAppliedDiscount(null); setPromoInput(''); setPromoError(''); }}
-                    className="text-emerald-500 hover:text-emerald-700 text-sm leading-none font-bold"
+                    style={{ background: 'none', border: 'none', color: '#16a34a', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0 }}
                   >
                     ×
                   </button>
                 </div>
               ) : (
-                <div className="flex gap-2">
+                <div style={{ display: 'flex', gap: 7 }}>
                   <input
                     value={promoInput}
-                    onChange={e => { setPromoInput(e.target.value); setPromoError(''); }}
+                    onChange={e => { setPromoInput(e.target.value.toUpperCase()); setPromoError(''); }}
                     onKeyDown={e => e.key === 'Enter' && handleApplyPromo()}
-                    placeholder="Promo code"
-                    className="flex-1 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 uppercase placeholder:normal-case"
+                    placeholder="Enter promo code"
+                    style={{
+                      flex: 1, padding: '9px 12px', fontSize: 13,
+                      border: '1px solid #e5e7eb', borderRadius: 9,
+                      outline: 'none', background: '#f9fafb', color: '#111827',
+                      fontFamily: 'inherit',
+                    }}
                   />
                   <button
                     onClick={handleApplyPromo}
                     disabled={promoLoading || !promoInput.trim()}
-                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-40 flex items-center gap-1"
+                    style={{
+                      padding: '9px 14px',
+                      background: '#111827', color: '#fff',
+                      border: 'none', borderRadius: 9,
+                      fontSize: 13, fontWeight: 700,
+                      cursor: promoLoading || !promoInput.trim() ? 'not-allowed' : 'pointer',
+                      flexShrink: 0,
+                      opacity: (promoLoading || !promoInput.trim()) ? 0.4 : 1,
+                      transition: 'opacity 0.15s',
+                    }}
                   >
-                    {promoLoading ? <Loader2 size={14} className="animate-spin" /> : 'Apply'}
+                    {promoLoading ? <Loader2 size={13} className="animate-spin" /> : 'Apply'}
                   </button>
                 </div>
               )}
               {promoError && (
-                <p className="text-xs text-red-500 font-medium">{promoError}</p>
+                <p style={{ fontSize: 11, color: '#dc2626', margin: '5px 0 0' }}>{promoError}</p>
               )}
             </div>
 
+            <div style={{ borderTop: '1px dashed #e5e7eb', margin: '0 0 16px' }} />
+
+            {/* Total */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: 16,
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Total</span>
+              <span style={{
+                fontSize: 26, fontWeight: 900, color: '#0f172a',
+                letterSpacing: '-0.03em', lineHeight: 1,
+              }}>
+                {formatUZS(discountedPrice)}
+              </span>
+            </div>
+
+            {/* Pay Now Button */}
             <button
               onClick={handlePurchase}
-              disabled={isProcessing}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-3 rounded-xl shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              disabled={isProcessing || packages.length === 0}
+              style={{
+                width: '100%', padding: '14px 0',
+                background: isProcessing || packages.length === 0
+                  ? '#93c5fd'
+                  : 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)',
+                color: '#fff', border: 'none', borderRadius: 12,
+                fontSize: 15, fontWeight: 700,
+                cursor: isProcessing || packages.length === 0 ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                transition: 'opacity 0.15s',
+                letterSpacing: '0.01em',
+                boxShadow: isProcessing || packages.length === 0 ? 'none' : '0 4px 14px rgba(37,99,235,0.35)',
+              }}
             >
-              {isProcessing ? (
-                <Loader2 size={20} className="animate-spin" />
-              ) : (
-                <>
-                  <CreditCard size={18} className="stroke-[2.5]" /> Pay Now
-                </>
-              )}
+              {isProcessing
+                ? <><Loader2 size={16} className="animate-spin" /> Processing…</>
+                : <>Pay Now <ArrowRight size={16} /></>
+              }
             </button>
 
-            <p className="text-center text-xs text-slate-500 font-medium mt-3">
-              Powered by Stripe · 256-bit SSL
-            </p>
+            {/* Trust badges */}
+            <div style={{
+              marginTop: 12,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 5, fontSize: 11, color: '#9ca3af',
+            }}>
+              <ShieldCheck size={13} style={{ color: '#22c55e' }} />
+              Secure encrypted payment
+            </div>
+
+            <div style={{ textAlign: 'center', marginTop: 10 }}>
+              <a href="/support" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none' }}>
+                Need help? Contact Support
+              </a>
+            </div>
           </div>
-        </div>
+        </aside>
       </main>
 
-      {/* Success modal */}
+      {/* ── Success Modal ────────────────────────────────────────────────── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-sm w-full text-center">
-            <div className="w-16 h-16 bg-emerald-100 rounded-2xl flex items-center justify-center mx-auto mb-5">
-              <CheckCircle2 size={40} className="text-emerald-600" />
+        <div style={{
+          position: 'fixed', inset: 0,
+          background: 'rgba(0,0,0,0.45)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 50, padding: 16,
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 20, padding: 36,
+            maxWidth: 360, width: '100%',
+            textAlign: 'center',
+            boxShadow: '0 24px 60px rgba(0,0,0,0.15)',
+          }}>
+            <div style={{
+              width: 68, height: 68, background: '#f0fdf4', borderRadius: '50%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px',
+            }}>
+              <CheckCircle2 size={38} style={{ color: '#10b981' }} />
             </div>
-            <h2 className="text-xl font-black text-slate-900 mb-2">Payment Successful!</h2>
-            {lastPurchased > 0 ? (
-              <p className="text-slate-500 text-sm font-medium mb-1">
-                Added <span className="text-blue-600 font-bold">{lastPurchased} credits</span> to your wallet.
-              </p>
-            ) : (
-              <p className="text-slate-500 text-sm font-medium mb-1">
-                Your credits will appear in your wallet shortly.
-              </p>
-            )}
-            <p className="text-slate-400 text-xs font-medium mb-6">
-              New balance: <span className="font-bold text-slate-600">{currentBalance}</span> credits
+            <h2 style={{ fontSize: 20, fontWeight: 800, color: '#111827', margin: '0 0 8px' }}>
+              Payment Successful!
+            </h2>
+            <p style={{ fontSize: 14, color: '#6b7280', margin: '0 0 22px' }}>
+              Your credits have been added to your account.
             </p>
+            <div style={{
+              background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12,
+              padding: '14px 18px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginBottom: 22,
+            }}>
+              <span style={{ fontSize: 13, color: '#6b7280' }}>New Balance</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: '#2563eb' }}>
+                {currentBalance} Credits
+              </span>
+            </div>
             <button
               onClick={() => navigate('/dashboard')}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-colors"
+              style={{
+                width: '100%', padding: '13px 0',
+                background: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)',
+                color: '#fff',
+                border: 'none', borderRadius: 12,
+                fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(37,99,235,0.35)',
+              }}
             >
               Go to Dashboard
             </button>

@@ -11,15 +11,10 @@ router.register('push-campaigns',  views.PushCampaignViewSet,  basename='push-ca
 router.register('discount-codes',  views.DiscountCodeViewSet,  basename='discount-code')
 
 urlpatterns = [
-    # ── ViewSet CRUD ──────────────────────────────────────────────────────
-    path('', include(router.urls)),
+    # ── Public / non-ViewSet endpoints FIRST (must come before router to avoid shadowing) ──
 
-    # ── KPI / Metrics (marketing-gated) ──────────────────────────────────
-    path('metrics/kpis/',        views.KPIView.as_view(),         name='marketing-kpis'),
-    path('metrics/funnel/',      views.FunnelView.as_view(),       name='marketing-funnel'),
-    path('metrics/revenue/',     views.RevenueView.as_view(),      name='marketing-revenue'),
-    path('metrics/retention/',   views.RetentionView.as_view(),    name='marketing-retention'),
-    path('metrics/acquisition/', views.AcquisitionView.as_view(),  name='marketing-acquisition'),
+    # ── Discount code validation (public) ────────────────────────────────
+    path('discount-codes/validate/', views.ValidateDiscountCodeView.as_view(), name='discount-validate'),
 
     # ── Banner tracking (public, no auth) ────────────────────────────────
     path('banners/active/',                          views.ActiveBannersView.as_view(),         name='banners-active'),
@@ -29,9 +24,19 @@ urlpatterns = [
     # ── Announcements (public active list) ───────────────────────────────
     path('announcements/active/', views.ActiveAnnouncementsView.as_view(), name='announcements-active'),
 
-    # ── Discount code validation (public) ────────────────────────────────
-    path('discount-codes/validate/', views.ValidateDiscountCodeView.as_view(), name='discount-validate'),
-
     # ── Push tokens (authenticated registration) ─────────────────────────
     path('push-tokens/', views.PushTokenView.as_view(), name='push-tokens'),
+
+    # ── Resend webhook (no auth — verified by Svix signature) ────────────
+    path('resend-webhook/', views.ResendWebhookView.as_view(), name='resend-webhook'),
+
+    # ── KPI / Metrics (marketing-gated) ──────────────────────────────────
+    path('metrics/kpis/',        views.KPIView.as_view(),         name='marketing-kpis'),
+    path('metrics/funnel/',      views.FunnelView.as_view(),       name='marketing-funnel'),
+    path('metrics/revenue/',     views.RevenueView.as_view(),      name='marketing-revenue'),
+    path('metrics/retention/',   views.RetentionView.as_view(),    name='marketing-retention'),
+    path('metrics/acquisition/', views.AcquisitionView.as_view(),  name='marketing-acquisition'),
+
+    # ── ViewSet CRUD (router last — catch-all for /discount-codes/, /banners/, etc.) ──
+    path('', include(router.urls)),
 ]

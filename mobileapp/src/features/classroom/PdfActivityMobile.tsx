@@ -8,7 +8,7 @@ import {
     Image,
     ActivityIndicator
 } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import storage from '../../lib/storage';
 import { FileText, Download, ExternalLink } from 'lucide-react-native';
 import { Colors, Shadows, Spacing } from '../../theme';
 import { BRIDGE_BASE_URL } from '../../api/client';
@@ -29,7 +29,7 @@ export default function PdfActivityMobile({ content, onAction, gameState, isTeac
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        SecureStore.getItemAsync('access_token').then(setToken);
+        storage.getItemAsync('access_token').then(setToken);
     }, []);
 
     const title = content.pdf_title || 'Document';

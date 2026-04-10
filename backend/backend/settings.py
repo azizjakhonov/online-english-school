@@ -4,7 +4,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / '.env')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,6 +28,8 @@ ALLOWED_HOSTS = [
     for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
     if h.strip()
 ]
+if DEBUG and 'localhost' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS += ['localhost', '127.0.0.1']
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
@@ -89,7 +91,8 @@ INSTALLED_APPS = [
     'channels',
     'drf_spectacular',
     'drf_spectacular_sidecar',
-    "django.contrib.humanize", # <--- ADD THIS LINE
+    "django.contrib.humanize",
+    'paytechuz',               # PayMe + Click.uz payment gateways
     # Local Apps
     'accounts',
     'scheduling',
@@ -99,7 +102,6 @@ INSTALLED_APPS = [
     'curriculum', # Ensure this is here
     'payments',   # Credit purchase history & billing
     'banners',
-    'auth_telegram',
     'marketing',
     'gamification',     # Coin / gamification system
 ]
@@ -227,10 +229,14 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         'CORS_ALLOWED_ORIGINS',
-        'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8081,http://192.168.1.30:8081,http://localhost:19006,http://192.168.1.30:8000',
+        'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8081,http://localhost:8082,http://192.168.1.30:8081,http://localhost:19006,http://192.168.1.30:8000',
     ).split(',')
     if origin.strip()
 ]
+# Always allow local dev origins (Expo web, Vite frontend) regardless of env var
+for _dev_origin in ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:8082']:
+    if _dev_origin not in CORS_ALLOWED_ORIGINS:
+        CORS_ALLOWED_ORIGINS.append(_dev_origin)
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'authorization',
@@ -243,6 +249,14 @@ CORS_EXPOSE_HEADERS = [
 ]
 SESSION_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        'CSRF_TRUSTED_ORIGINS',
+        'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000',
+    ).split(',')
+    if origin.strip()
+]
 
 # In production (DEBUG=False / HTTPS), these MUST be True.
 # They are automatically True when DEBUG is False.
@@ -279,24 +293,37 @@ ESKIZ_EMAIL = os.getenv('ESKIZ_EMAIL', '')
 ESKIZ_PASSWORD = os.getenv('ESKIZ_PASSWORD', '')
 ESKIZ_NICKNAME = os.getenv('ESKIZ_NICKNAME', '')
 
-# AGORA VIDEO CALLS
-AGORA_APP_ID = os.getenv('AGORA_APP_ID', '')
-AGORA_APP_CERTIFICATE = os.getenv('AGORA_APP_CERTIFICATE', '')
 
-# TELEGRAM AUTH
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
-TELEGRAM_BOT_USERNAME = os.getenv('TELEGRAM_BOT_USERNAME', '')
-TELEGRAM_WEBHOOK_SECRET = os.getenv('TELEGRAM_WEBHOOK_SECRET', '')
-
-# GOOGLE AUTH
-GOOGLE_OAUTH_CLIENT_ID = os.getenv('GOOGLE_OAUTH_CLIENT_ID', '')
-
-# STRIPE PAYMENTS
-STRIPE_SECRET_KEY  = os.getenv('STRIPE_SECRET_KEY', '')
-STRIPE_PUBLIC_KEY  = os.getenv('STRIPE_PUBLIC_KEY', '')
+# STRIPE PAYMENTS (optional — for international students paying in USD)
+STRIPE_SECRET_KEY     = os.getenv('STRIPE_SECRET_KEY', '')
+STRIPE_PUBLIC_KEY     = os.getenv('STRIPE_PUBLIC_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
-# Frontend origin used in Stripe success/cancel redirect URLs.
+# UZS → USD conversion rate used when charging Stripe (approximate)
+STRIPE_UZS_TO_USD_RATE = float(os.getenv('STRIPE_UZS_TO_USD_RATE', '12700'))
+
+# Frontend origin used in payment gateway success/cancel redirect URLs.
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+# PAYME.UZ (Uzbekistan payment gateway)
+# Get credentials at https://merchant.paycom.uz
+# Registration takes 3-7 business days. Use test credentials during development.
+PAYME = {
+    'PAYME_ID':            os.getenv('PAYME_ID', ''),
+    'PAYME_KEY':           os.getenv('PAYME_KEY', ''),
+    'PAYME_TEST_KEY':      os.getenv('PAYME_TEST_KEY', ''),
+    'PAYME_ACCOUNT_FIELD': 'order_id',         # key used in checkout URL account[]
+    'PAYME_ACCOUNT_MODEL': 'payments.Payment', # model paytechuz looks up
+    'PAYME_AMOUNT_FIELD':  'amount_uzs',       # field on Payment (in UZS; × 100 = tiyins)
+}
+
+# CLICK.UZ (Uzbekistan payment gateway)
+# Get credentials at https://my.click.uz/business/
+# Registration takes 3-7 business days. Use test credentials during development.
+CLICK = {
+    'CLICK_SERVICE_ID':  os.getenv('CLICK_SERVICE_ID', ''),
+    'CLICK_MERCHANT_ID': os.getenv('CLICK_MERCHANT_ID', ''),
+    'CLICK_SECRET_KEY':  os.getenv('CLICK_SECRET_KEY', ''),
+}
 
 # Allow Google OAuth popups to postMessage back to this page.
 # Django's SecurityMiddleware defaults to 'same-origin' which kills the popup callback.
@@ -308,6 +335,7 @@ SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin-allow-popups'
 SECURE_CONTENT_TYPE_NOSNIFF = True
 # Redirect all plain-HTTP traffic to HTTPS in production. No-op when DEBUG=True.
 SECURE_SSL_REDIRECT = not DEBUG
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # HSTS: tell browsers to always use HTTPS for this domain (production only).
 # Enable only after confirming HTTPS works correctly — it's hard to undo.
 SECURE_HSTS_SECONDS = 0 if DEBUG else 31536000  # 1 year
@@ -338,6 +366,9 @@ TWILIO_FROM_NUMBER = os.getenv('TWILIO_FROM_NUMBER', '')
 # Resend (email campaigns — replaces SendGrid for marketing module)
 RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
 RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'noreply@yourdomain.com')
+# Webhook signing secret from Resend dashboard → Webhooks → Signing Secret
+# Format: "whsec_<base64>". If empty, signature verification is skipped (dev only).
+RESEND_WEBHOOK_SECRET = os.getenv('RESEND_WEBHOOK_SECRET', '')
 
 # ─── Push ────────────────────────────────────────────────────────────────────
 EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send'

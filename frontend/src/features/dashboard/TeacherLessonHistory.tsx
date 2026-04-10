@@ -182,7 +182,10 @@ function EditModal({ lesson, onClose, onSave }: EditModalProps) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherLessonHistory() {
+    usePageTitle('Lesson History');
     const navigate = useNavigate();
     const [lessons, setLessons] = useState<LessonHistoryItem[]>([]);
     const [loading, setLoading] = useState(true);

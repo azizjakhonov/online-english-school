@@ -7,7 +7,10 @@ interface ApiError {
   response?: { data?: { error?: string } };
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherLoginPage() {
+  usePageTitle('Teacher Sign In');
   const navigate = useNavigate();
   const [phoneSuffix, setPhoneSuffix] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,7 +19,7 @@ export default function TeacherLoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (phoneSuffix.length !== 9) {
-      setError('Please enter a valid 9-digit phone number');
+      setError('Iltimos, 9 xonali telefon raqami kiriting');
       return;
     }
     setLoading(true);
@@ -24,10 +27,15 @@ export default function TeacherLoginPage() {
     try {
       const phone = `+998${phoneSuffix}`;
       await api.post('/api/send-otp/', { phone });
-      navigate('/teacher/verify-otp', { state: { phone, from: 'login' } });
+      navigate('/teacher/verify-otp', {
+        state: {
+          phone,
+          from: 'login',
+        }
+      });
     } catch (err) {
       const e = err as ApiError;
-      setError(e.response?.data?.error || 'Failed to send code. Please try again.');
+      setError(e.response?.data?.error || 'Kod yuborishda xatolik yuz berdi.');
     } finally {
       setLoading(false);
     }
@@ -40,7 +48,7 @@ export default function TeacherLoginPage() {
           to="/login"
           className="inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-slate-700 mb-6 transition-colors uppercase tracking-widest"
         >
-          <ArrowLeft size={16} /> Main Login
+          <ArrowLeft size={16} /> Asosiy kirish
         </Link>
 
         <div className="bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
@@ -48,9 +56,9 @@ export default function TeacherLoginPage() {
             <School size={28} className="text-blue-600" />
           </div>
 
-          <h1 className="text-2xl font-black text-slate-900 mb-1">Teacher Login</h1>
+          <h1 className="text-2xl font-black text-slate-900 mb-1">O'qituvchi kirishi</h1>
           <p className="text-sm text-slate-500 font-medium mb-8">
-            Enter your phone number to sign in to your teacher account
+            O'qituvchi hisobingizga kirish uchun telefon raqamingizni kiriting
           </p>
 
           {error && (
@@ -62,7 +70,7 @@ export default function TeacherLoginPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
-                Phone Number
+                Telefon raqam
               </label>
               <div className="flex items-center bg-slate-50 border-2 border-slate-100 rounded-2xl focus-within:border-blue-500 focus-within:bg-white transition-all overflow-hidden">
                 <div className="px-4 py-3.5 bg-slate-100/60 border-r border-slate-200 shrink-0">
@@ -85,14 +93,15 @@ export default function TeacherLoginPage() {
               disabled={loading}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-2xl transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-100"
             >
-              {loading ? <Loader2 size={20} className="animate-spin" /> : 'Send Verification Code'}
+              {loading ? <Loader2 size={20} className="animate-spin" /> : 'Tasdiqlash kodini yuborish'}
             </button>
+
           </form>
 
           <p className="text-center text-sm text-slate-500 mt-6">
-            New teacher?{' '}
+            Yangi o'qituvchimisiz?{' '}
             <Link to="/teacher/register" className="font-bold text-blue-600 hover:underline">
-              Create account
+              Ro'yxatdan o'tish
             </Link>
           </p>
         </div>
@@ -100,3 +109,4 @@ export default function TeacherLoginPage() {
     </div>
   );
 }
+

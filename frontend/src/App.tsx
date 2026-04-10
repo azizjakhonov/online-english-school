@@ -12,6 +12,7 @@ const DiscountCodes = lazy(() => import('./views/marketing/DiscountCodes'))
 const RevenuePanel = lazy(() => import('./views/marketing/RevenuePanel'))
 const FunnelPanel = lazy(() => import('./views/marketing/FunnelPanel'))
 const RetentionPanel = lazy(() => import('./views/marketing/RetentionPanel'))
+const PackagesPanel = lazy(() => import('./views/marketing/PackagesPanel'))
 
 import { AuthProvider, useAuth } from './features/auth/AuthContext';
 import Login from './features/auth/Login';
@@ -52,6 +53,7 @@ import TeacherOnboardingPage from './features/teachers/TeacherOnboardingPage';
 import TeacherPendingApprovalPage from './features/teachers/TeacherPendingApprovalPage';
 import RateLessonPage from './features/students/RateLessonPage';
 import AppLayout from './layouts/AppLayout';
+import ImpersonationBanner from './components/ImpersonationBanner';
 
 // ─── ProtectedRoute ────────────────────────────────────────────────────────────
 
@@ -73,13 +75,76 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// ─── ImpersonationHandler ─────────────────────────────────────────────────────
+// Step 2 of the impersonation flow:
+// Django admin redirects here with ?_impersonate_token=<signed_token>
+// We exchange the signed token for a JWT via the public exchange endpoint (no auth needed).
+import { useEffect } from 'react';
+import { useSearchParams, useNavigate as useNav } from 'react-router-dom';
+import api from './lib/api';
+
+function ImpersonationHandler() {
+  const [params] = useSearchParams();
+  const nav = useNav();
+
+  useEffect(() => {
+    const token = params.get('_impersonate_token');
+    if (!token) { nav('/login', { replace: true }); return; }
+
+    const run = async () => {
+      try {
+        // Call the PUBLIC exchange endpoint — no JWT auth header sent
+        const res = await api.post(
+          '/api/admin/impersonate/exchange/',
+          { token },
+          { headers: { Authorization: '' } }   // clear any stored JWT
+        );
+        const { access, refresh, impersonated_user } = res.data;
+
+        // Save original admin tokens (if any were stored from being logged in as admin on this tab)
+        const currentAccess = localStorage.getItem('access_token');
+        const currentRefresh = localStorage.getItem('refresh_token');
+        if (currentAccess) localStorage.setItem('admin_original_token', currentAccess);
+        if (currentRefresh) localStorage.setItem('admin_original_refresh', currentRefresh);
+
+        // Set impersonation tokens
+        localStorage.setItem('access_token', access);
+        localStorage.setItem('refresh_token', refresh);
+        localStorage.setItem('impersonation_active', '1');
+        localStorage.setItem('impersonated_user', JSON.stringify(impersonated_user));
+
+        // Redirect to dashboard (clean URL — no token in address bar)
+        nav('/dashboard', { replace: true });
+        window.location.reload();
+      } catch (err: any) {
+        const msg = err?.response?.data?.error || 'Impersonation failed.';
+        alert(msg);
+        nav('/', { replace: true });
+      }
+    };
+    run();
+  }, []);
+
+  return (
+    <div className="h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-4 border-violet-500 border-t-transparent mx-auto mb-3" />
+        <p className="text-sm text-gray-500">Setting up impersonation…</p>
+      </div>
+    </div>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <ImpersonationBanner />
         <Routes>
+          {/* ── Impersonation handler (triggered by admin button) ── */}
+          <Route path="/" element={<ImpersonationHandler />} />
           {/* ── Public auth routes (no announcement bar) ── */}
           <Route path="/login" element={<Login />} />
           <Route path="/teacher/login" element={<TeacherLoginPage />} />
@@ -114,6 +179,7 @@ function App() {
             </Suspense>
           }>
             <Route index element={<Suspense fallback={null}><MarketingOverview /></Suspense>} />
+            <Route path="packages" element={<Suspense fallback={null}><PackagesPanel /></Suspense>} />
             <Route path="banners" element={<Suspense fallback={null}><BannerManager /></Suspense>} />
             <Route path="announcements" element={<Suspense fallback={null}><AnnouncementManager /></Suspense>} />
             <Route path="email" element={<Suspense fallback={null}><EmailCampaigns /></Suspense>} />

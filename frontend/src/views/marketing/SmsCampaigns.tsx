@@ -292,7 +292,10 @@ const CampaignRow = memo(function CampaignRow({ campaign: c, onEdit, onDelete, o
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function SmsCampaigns() {
+  usePageTitle('SMS Campaigns');
   const qc = useQueryClient()
   const [modalData, setModalData] = useState<Partial<SmsCampaign> | null | false>(false)
   const [sendingId, setSendingId] = useState<number | null>(null)

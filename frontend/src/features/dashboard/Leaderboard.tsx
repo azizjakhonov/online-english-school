@@ -12,7 +12,10 @@ interface LeaderboardEntry {
 
 type Period = 'weekly' | 'monthly' | 'all_time';
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function Leaderboard() {
+    usePageTitle('Leaderboard');
     const navigate = useNavigate();
     const [data, setData] = useState<LeaderboardEntry[]>([]);
     const [loading, setLoading] = useState(true);

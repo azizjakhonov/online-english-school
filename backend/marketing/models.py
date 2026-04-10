@@ -25,9 +25,9 @@ class Banner(models.Model):
     title = models.CharField(max_length=200)
     subtitle = models.CharField(max_length=400, blank=True)
     image = models.ImageField(upload_to='banners/', null=True, blank=True)
-    image_url = models.URLField(blank=True)          # alternative to uploaded image
+    image_url = models.CharField(max_length=500, blank=True)  # alternative to uploaded image — accepts relative or absolute URLs
     cta_text = models.CharField(max_length=100, blank=True)
-    cta_url = models.URLField(blank=True)
+    cta_url = models.CharField(max_length=500, blank=True)    # accepts relative paths like /buy-credits
     cta_open_new_tab = models.BooleanField(default=False)
     background_color = models.CharField(max_length=20, default='#ffffff')
     text_color = models.CharField(max_length=20, default='#000000')
@@ -36,6 +36,7 @@ class Banner(models.Model):
     banner_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='carousel')
 
     is_active = models.BooleanField(default=True)
+    is_archived = models.BooleanField(default=False)  # soft delete
     order = models.PositiveIntegerField(default=0)       # for drag-and-drop reordering
 
     starts_at = models.DateTimeField(null=True, blank=True)
@@ -83,6 +84,7 @@ class Announcement(models.Model):
     body = models.TextField()
     target_audience = models.CharField(max_length=20, choices=TARGET_CHOICES, default='both')
     is_active = models.BooleanField(default=True)
+    is_archived = models.BooleanField(default=False)  # soft delete
     is_dismissible = models.BooleanField(default=True)
     priority = models.PositiveIntegerField(default=0)    # higher = shown first
 

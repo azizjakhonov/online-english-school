@@ -14,7 +14,10 @@ interface ApiError {
 
 const RATING_LABELS = ['', 'Poor', 'Fair', 'Good', 'Great', 'Excellent!'];
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function RateLessonPage() {
+  usePageTitle('Rate Your Lesson');
   const { lessonId } = useParams<{ lessonId: string }>();
   const navigate = useNavigate();
 

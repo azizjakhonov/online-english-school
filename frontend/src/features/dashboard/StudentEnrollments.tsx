@@ -60,7 +60,10 @@ function StatusBadge({ status, label }: { status: Enrollment['status']; label: s
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentEnrollments() {
+    usePageTitle('My Courses');
     const qc = useQueryClient();
     const [showEnrollForm, setShowEnrollForm] = useState(false);
     const [selectedCourseId, setSelectedCourseId] = useState<number | ''>('');

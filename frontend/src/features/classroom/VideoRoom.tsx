@@ -269,6 +269,7 @@ function WaitingOverlay() {
 interface RemoteParticipantInfo {
   participant: RemoteParticipant;
   videoTrack: RemoteTrack | null;
+  audioTrack: RemoteTrack | null;
   audioMuted: boolean;
   cameraMuted: boolean;
 }
@@ -315,6 +316,7 @@ export default function VideoRoom({
         infos.push({
           participant: p,
           videoTrack: camPub?.track ?? null,
+          audioTrack: micPub?.track ?? null,
           cameraMuted: camPub?.isMuted ?? true,
           audioMuted: micPub?.isMuted ?? true,
         });
@@ -458,10 +460,11 @@ export default function VideoRoom({
         />
 
         {/* ── Remote tiles ───────────────────────────────────────────── */}
-        {remoteParticipants.map(({ participant, videoTrack, cameraMuted, audioMuted }) => (
+        {remoteParticipants.map(({ participant, videoTrack, audioTrack, cameraMuted, audioMuted }) => (
           <RemoteTile
             key={participant.sid}
             videoTrack={videoTrack}
+            audioTrack={audioTrack}
             cameraMuted={cameraMuted}
             audioMuted={audioMuted}
             label="Teacher"
@@ -479,6 +482,7 @@ export default function VideoRoom({
 // ── RemoteTile — handles its own track attachment lifecycle ────────────────────
 interface RemoteTileProps {
   videoTrack: RemoteTrack | null;
+  audioTrack: RemoteTrack | null;
   cameraMuted: boolean;
   audioMuted: boolean;
   label: string;
@@ -487,11 +491,34 @@ interface RemoteTileProps {
 
 const RemoteTile = memo(function RemoteTile({
   videoTrack,
+  audioTrack,
   cameraMuted,
   audioMuted,
   label,
   roleBadge,
 }: RemoteTileProps) {
+  // ── Audio: attach / detach whenever the track or mute state changes ──────
+  useEffect(() => {
+    if (!audioTrack) return;
+
+    // attach() creates an <audio> element and begins playback.
+    // Detach it on cleanup so we never stack duplicate elements.
+    const audioEl = audioTrack.attach();
+    audioEl.autoplay = true;
+    // Keep the element off-screen — it only needs to exist in the DOM to play.
+    audioEl.style.position = 'absolute';
+    audioEl.style.width = '1px';
+    audioEl.style.height = '1px';
+    audioEl.style.opacity = '0';
+    audioEl.style.pointerEvents = 'none';
+    document.body.appendChild(audioEl);
+
+    return () => {
+      audioTrack.detach(audioEl);
+      audioEl.remove();
+    };
+  }, [audioTrack]);
+
   const attachRemoteVideo = useCallback(
     (container: HTMLDivElement | null) => {
       if (!container) return;

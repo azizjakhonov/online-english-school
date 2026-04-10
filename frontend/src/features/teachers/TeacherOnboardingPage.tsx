@@ -7,7 +7,10 @@ interface ApiError {
   response?: { data?: { error?: string } };
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherOnboardingPage() {
+  usePageTitle('Complete Your Profile');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');

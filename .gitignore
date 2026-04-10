@@ -1,70 +1,45 @@
-@"
-# ========================
-# SECRETS & ENV
-# ========================
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-secrets/
-
-# ========================
-# PYTHON / DJANGO
-# ========================
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyd
-venv/
-.venv/
-env/
 *.egg-info/
+*.egg
 dist/
 build/
-*.log
+.venv/
+venv/
+env/
+*.sqlite3
 db.sqlite3
-media/
-staticfiles/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-pyrightconfig.json
 
-# ========================
-# NODE / FRONTEND
-# ========================
+# Environment files (contain secrets)
+.env
+.env.*
+!.env.example
+
+# Node
 node_modules/
-frontend/dist/
-frontend/.env
-frontend/.env.*
-!frontend/.env.example
-*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# ========================
-# MOBILE APP
-# ========================
-mobileapp/node_modules/
+# Build outputs
+frontend/dist/
 mobileapp/.expo/
 mobileapp/dist/
-mobileapp/build/
-mobileapp/.env
-mobileapp/.env.*
-!mobileapp/.env.example
 
-# ========================
-# EDITORS & OS
-# ========================
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
 
-# ========================
-# MISC
-# ========================
-.claude/
-1/
-2/
-test_output.txt
-"@ | Set-Content D:\EDU\OnlineSchool\.gitignore
+# OS
+desktop.ini
+
+# Misc
+*.log
+.cursor/

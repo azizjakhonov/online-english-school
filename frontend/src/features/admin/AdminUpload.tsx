@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UploadCloud, Loader2, CheckCircle, FileText } from 'lucide-react';
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function AdminUpload() {
+  usePageTitle('Media Upload');
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [file, setFile] = useState<File | null>(null);

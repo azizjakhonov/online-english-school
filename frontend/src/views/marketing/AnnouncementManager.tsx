@@ -219,8 +219,12 @@ function AnnouncementModal({ initial, onSave, onClose, saving }: ModalProps) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function AnnouncementManager() {
+  usePageTitle('Announcements');
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [archived, setArchived] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [modal, setModal] = useState<{ open: boolean; editing: Announcement | null }>({
@@ -229,13 +233,18 @@ export default function AnnouncementManager() {
   })
   const [saving, setSaving] = useState(false)
   const [filterAudience, setFilterAudience] = useState<string>('all')
+  const [view, setView] = useState<'active' | 'history'>('active')
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     try {
       setError(null)
-      const res = await api.get('/api/marketing/announcements/')
-      setAnnouncements(res.data.results ?? res.data)
+      const [activeRes, archivedRes] = await Promise.all([
+        api.get('/api/marketing/announcements/'),
+        api.get('/api/marketing/announcements/?archived=true'),
+      ])
+      setAnnouncements(activeRes.data.results ?? activeRes.data)
+      setArchived(archivedRes.data.results ?? archivedRes.data)
     } catch {
       setError('Failed to load announcements.')
     } finally {
@@ -293,15 +302,15 @@ export default function AnnouncementManager() {
 
   const modalInitial: AnnouncementFormData = modal.editing
     ? {
-        title: modal.editing.title,
-        body: modal.editing.body,
-        target_audience: modal.editing.target_audience,
-        is_active: modal.editing.is_active,
-        is_dismissible: modal.editing.is_dismissible,
-        priority: modal.editing.priority,
-        starts_at: modal.editing.starts_at ? modal.editing.starts_at.substring(0, 16) : '',
-        ends_at: modal.editing.ends_at ? modal.editing.ends_at.substring(0, 16) : '',
-      }
+      title: modal.editing.title,
+      body: modal.editing.body,
+      target_audience: modal.editing.target_audience,
+      is_active: modal.editing.is_active,
+      is_dismissible: modal.editing.is_dismissible,
+      priority: modal.editing.priority,
+      starts_at: modal.editing.starts_at ? modal.editing.starts_at.substring(0, 16) : '',
+      ends_at: modal.editing.ends_at ? modal.editing.ends_at.substring(0, 16) : '',
+    }
     : EMPTY_FORM
 
   const filtered = filterAudience === 'all'
@@ -317,123 +326,179 @@ export default function AnnouncementManager() {
         <div>
           <h1 className="text-xl font-semibold text-stone-800">Announcements</h1>
           <p className="text-sm text-stone-400 mt-0.5">
-            {liveCount} live · {announcements.length} total
+            {liveCount} live · {announcements.length} active
           </p>
         </div>
+        {view === 'active' && (
+          <button
+            onClick={() => setModal({ open: true, editing: null })}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+          >
+            + New Announcement
+          </button>
+        )}
+      </div>
+
+      {/* View Tabs */}
+      <div className="flex gap-4 border-b border-stone-200">
         <button
-          onClick={() => setModal({ open: true, editing: null })}
-          className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+          onClick={() => setView('active')}
+          className={`pb-2 text-sm font-medium border-b-2 transition-colors ${view === 'active' ? 'border-amber-600 text-amber-700' : 'border-transparent text-stone-500 hover:text-stone-700'
+            }`}
         >
-          + New Announcement
+          Active
+        </button>
+        <button
+          onClick={() => setView('history')}
+          className={`pb-2 text-sm font-medium border-b-2 transition-colors ${view === 'history' ? 'border-stone-600 text-stone-700' : 'border-transparent text-stone-500 hover:text-stone-700'
+            }`}
+        >
+          History {archived.length > 0 && <span className="ml-1 bg-stone-100 text-stone-600 text-xs px-1.5 py-0.5 rounded-full">{archived.length}</span>}
         </button>
       </div>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-stone-200">
-        {(['all', 'student', 'teacher'] as const).map(aud => (
-          <button
-            key={aud}
-            onClick={() => setFilterAudience(aud)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors capitalize
+      {view === 'history' && (
+        <div className="bg-white rounded-xl border border-stone-200 overflow-hidden">
+          {archived.length === 0 ? (
+            <div className="text-center py-12 text-stone-400 text-sm">No archived announcements yet.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-stone-200 bg-stone-50 text-left">
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Title</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Audience</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Priority</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-stone-500 uppercase tracking-wide">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {archived.map(a => (
+                  <tr key={a.id} className="border-b border-stone-100 hover:bg-stone-50">
+                    <td className="px-4 py-3 font-medium text-stone-700">
+                      {a.title}
+                      {a.body && <p className="text-xs text-stone-400 font-normal mt-0.5 truncate max-w-xs">{a.body}</p>}
+                    </td>
+                    <td className="px-4 py-3 text-stone-500 capitalize">{a.target_audience}</td>
+                    <td className="px-4 py-3 text-stone-600">{a.priority}</td>
+                    <td className="px-4 py-3 text-stone-400 text-xs">{new Date(a.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {view === 'active' && (
+        <>
+          {/* Filter tabs */}
+          <div className="flex gap-1 border-b border-stone-200">
+            {(['all', 'student', 'teacher'] as const).map(aud => (
+              <button
+                key={aud}
+                onClick={() => setFilterAudience(aud)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors capitalize
               ${filterAudience === aud
-                ? 'border-amber-600 text-amber-700'
-                : 'border-transparent text-stone-500 hover:text-stone-700'}`}
-          >
-            {aud === 'all' ? 'All' : aud.charAt(0).toUpperCase() + aud.slice(1)}
-          </button>
-        ))}
-      </div>
+                    ? 'border-amber-600 text-amber-700'
+                    : 'border-transparent text-stone-500 hover:text-stone-700'}`}
+              >
+                {aud === 'all' ? 'All' : aud.charAt(0).toUpperCase() + aud.slice(1)}
+              </button>
+            ))}
+          </div>
 
-      {/* List */}
-      {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="bg-white rounded-lg border border-stone-200 p-4 h-16 animate-pulse" />
-          ))}
-        </div>
-      ) : error ? (
-        <div className="bg-red-50 text-red-600 text-sm rounded-lg p-4">{error}</div>
-      ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-lg border border-stone-200 p-12 text-center text-stone-400 text-sm">
-          No announcements yet.{' '}
-          <button
-            onClick={() => setModal({ open: true, editing: null })}
-            className="text-amber-600 hover:underline"
-          >
-            Create one
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered
-            .sort((a, b) => b.priority - a.priority)
-            .map(ann => {
-              const status = getStatus(ann)
-              return (
-                <div
-                  key={ann.id}
-                  className="bg-white rounded-lg border border-stone-200 p-4 flex items-start gap-4"
-                >
-                  {/* Priority badge */}
-                  <div className="mt-0.5 w-8 h-8 rounded-lg bg-stone-100 flex items-center justify-center text-xs font-bold text-stone-500 shrink-0">
-                    {ann.priority}
-                  </div>
+          {/* List */}
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="bg-white rounded-lg border border-stone-200 p-4 h-16 animate-pulse" />
+              ))}
+            </div>
+          ) : error ? (
+            <div className="bg-red-50 text-red-600 text-sm rounded-lg p-4">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="bg-white rounded-lg border border-stone-200 p-12 text-center text-stone-400 text-sm">
+              No announcements yet.{' '}
+              <button
+                onClick={() => setModal({ open: true, editing: null })}
+                className="text-amber-600 hover:underline"
+              >
+                Create one
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filtered
+                .sort((a, b) => b.priority - a.priority)
+                .map(ann => {
+                  const status = getStatus(ann)
+                  return (
+                    <div
+                      key={ann.id}
+                      className="bg-white rounded-lg border border-stone-200 p-4 flex items-start gap-4"
+                    >
+                      {/* Priority badge */}
+                      <div className="mt-0.5 w-8 h-8 rounded-lg bg-stone-100 flex items-center justify-center text-xs font-bold text-stone-500 shrink-0">
+                        {ann.priority}
+                      </div>
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-stone-800">{ann.title}</p>
-                    {ann.body && (
-                      <p className="text-xs text-stone-400 mt-0.5 truncate">{ann.body}</p>
-                    )}
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${status.cls}`}>
-                        {status.label}
-                      </span>
-                      <span className="text-xs text-stone-400 capitalize">{ann.target_audience}</span>
-                      {ann.is_dismissible && (
-                        <span className="text-xs text-stone-400">· Dismissible</span>
-                      )}
-                    </div>
-                  </div>
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-stone-800">{ann.title}</p>
+                        {ann.body && (
+                          <p className="text-xs text-stone-400 mt-0.5 truncate">{ann.body}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${status.cls}`}>
+                            {status.label}
+                          </span>
+                          <span className="text-xs text-stone-400 capitalize">{ann.target_audience}</span>
+                          {ann.is_dismissible && (
+                            <span className="text-xs text-stone-400">· Dismissible</span>
+                          )}
+                        </div>
+                      </div>
 
-                  {/* Active toggle */}
-                  <button
-                    onClick={() => handleToggle(ann.id, !ann.is_active)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-0.5
+                      {/* Active toggle */}
+                      <button
+                        onClick={() => handleToggle(ann.id, !ann.is_active)}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-0.5
                       ${ann.is_active ? 'bg-emerald-500' : 'bg-stone-200'}`}
-                    aria-label="Toggle active"
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform
+                        aria-label="Toggle active"
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform
                         ${ann.is_active ? 'translate-x-4' : 'translate-x-0'}`}
-                    />
-                  </button>
+                        />
+                      </button>
 
-                  {/* Edit / Delete */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => setModal({ open: true, editing: ann })}
-                      className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-md transition-colors"
-                      aria-label="Edit"
-                    >
-                      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <path d="M11.5 1.5l2 2-9 9H2.5v-2l9-9z" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={() => handleDelete(ann.id)}
-                      className="p-1.5 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
-                      aria-label="Delete"
-                    >
-                      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5">
-                        <path d="M2 4h11M5 4V2h5v2M6 7v5M9 7v5M3 4l.8 9.2a1 1 0 001 .8h5.4a1 1 0 001-.8L12 4" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-        </div>
+                      {/* Edit / Delete */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => setModal({ open: true, editing: ann })}
+                          className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-md transition-colors"
+                          aria-label="Edit"
+                        >
+                          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M11.5 1.5l2 2-9 9H2.5v-2l9-9z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDelete(ann.id)}
+                          className="p-1.5 text-stone-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+                          aria-label="Delete"
+                        >
+                          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M2 4h11M5 4V2h5v2M6 7v5M9 7v5M3 4l.8 9.2a1 1 0 001 .8h5.4a1 1 0 001-.8L12 4" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          )}
+        </>
       )}
 
       {/* Modal */}

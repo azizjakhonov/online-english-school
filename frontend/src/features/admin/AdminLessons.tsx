@@ -15,7 +15,10 @@ interface Lesson {
   status: 'scheduled' | 'completed' | 'canceled';
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function AdminLessons() {
+  usePageTitle('Manage Lessons');
   const navigate = useNavigate();
   const [lessons, setLessons] = useState<Lesson[]>([]); // FIX: Typed state
   const [loading, setLoading] = useState(true);

@@ -18,7 +18,6 @@ urlpatterns = [
     # Accounts/auth APIs
     path('api/', include('accounts.urls')),
     path('api/accounts/', include('accounts.urls')),
-    path('api/auth/telegram/', include('auth_telegram.urls')),
 
     # Scheduling APIs
     path('api/', include('scheduling.urls')),

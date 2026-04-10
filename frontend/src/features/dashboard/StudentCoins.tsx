@@ -65,7 +65,10 @@ const CLAIM_STATUS_ICONS: Record<string, React.ReactNode> = {
 
 type Tab = 'balance' | 'store' | 'claims';
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentCoins() {
+    usePageTitle('My Coins');
     const qc = useQueryClient();
     const [tab, setTab] = useState<Tab>('balance');
     const [claimingId, setClaimingId] = useState<number | null>(null);

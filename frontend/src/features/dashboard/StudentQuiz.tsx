@@ -30,7 +30,10 @@ interface QuizData {
   questions: Question[];
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentQuiz() {
+  usePageTitle('Quiz');
   const { id } = useParams();
   const navigate = useNavigate();
 

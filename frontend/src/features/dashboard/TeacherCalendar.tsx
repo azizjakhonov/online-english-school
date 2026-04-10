@@ -11,7 +11,10 @@ interface CalendarEvent {
   is_booked: boolean;
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherCalendar() {
+  usePageTitle('My Calendar');
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeDate, setActiveDate] = useState(new Date());

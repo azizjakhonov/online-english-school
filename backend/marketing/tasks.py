@@ -125,5 +125,17 @@ def snapshot_daily_metrics() -> None:
         status='COMPLETED', start_time__date=yesterday
     ).count()
 
+    # Active students: logged in within the last 30 days
+    from django.utils import timezone as tz
+    thirty_days_ago = tz.now() - timedelta(days=30)
+    snap.active_students_30d = User.objects.filter(
+        role='STUDENT', last_login__gte=thirty_days_ago
+    ).count()
+
+    # CAC: requires ad-spend data. Left at 0 until an ad-spend input model is added.
+    # To set manually: MarketingMetricsSnapshot.objects.filter(date=yesterday).update(cac=<value>)
+    if not snap.cac:
+        snap.cac = 0
+
     snap.save()
     logger.info('Daily metrics snapshot saved for %s', yesterday)

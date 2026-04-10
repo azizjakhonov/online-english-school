@@ -1,7 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { Clock, LogOut, School, CheckCircle, Mail } from 'lucide-react';
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherPendingApprovalPage() {
+  usePageTitle('Pending Approval');
   const navigate = useNavigate();
 
   const handleLogout = () => {

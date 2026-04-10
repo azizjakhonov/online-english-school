@@ -203,8 +203,11 @@ class MyLessonsView(generics.ListAPIView):
         grace = timezone.timedelta(minutes=10)
         return Lesson.objects.filter(
             Q(student=user) | Q(teacher=user),
-            end_time__gte=now - grace,           # includes in-progress + upcoming
-            status__in=['PENDING', 'CONFIRMED'],  # exclude completed / cancelled
+            end_time__gte=now - grace,           # includes in-progress + upcoming + recently ended
+        ).filter(
+            # Active upcoming/in-progress lessons OR completed-but-still-within-window lessons
+            Q(status__in=['PENDING', 'CONFIRMED']) |
+            Q(status='COMPLETED', end_time__gte=now - grace)
         ).select_related('student', 'teacher').order_by('start_time')
 
 # ==========================================

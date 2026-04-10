@@ -14,10 +14,6 @@ class Migration(migrations.Migration):
             name='useridentity',
             unique_together={('provider', 'provider_id'), ('user', 'provider')},
         ),
-        migrations.RemoveField(
-            model_name='teacherprofile',
-            name='hourly_rate',
-        ),
         migrations.AddField(
             model_name='teacherprofile',
             name='language_certificates',

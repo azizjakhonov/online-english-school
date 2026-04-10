@@ -1,14 +1,31 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Save, ArrowLeft, Loader2, Youtube, AlertCircle,
-  User, Briefcase, CheckCircle2, Camera
+  User, Briefcase, CheckCircle2, Camera, Plus, X,
+  BookOpen, Globe
 } from 'lucide-react';
 import api from '../../lib/api';
 import Avatar from '../../components/Avatar';
 import { useAuth } from '../auth/AuthContext';
 
 // --- TYPES ---
+interface Subject {
+  id: number;
+  name: string;
+}
+
+interface TeacherSubjectLink {
+  id: number;         // TeacherSubject.id (for DELETE)
+  subject_id: number;
+  name: string;
+}
+
+interface Language {
+  language: string;
+  proficiency: string;
+}
+
 interface TeacherProfileData {
   full_name: string;
   headline: string;
@@ -16,7 +33,12 @@ interface TeacherProfileData {
   youtube_intro_url: string;
 }
 
+const PROFICIENCY_OPTIONS = ['Native', 'Fluent', 'Intermediate', 'Basic'];
+
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherSettings() {
+  usePageTitle('Profile & Settings');
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -26,7 +48,7 @@ export default function TeacherSettings() {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
 
-  // Form State
+  // Basic form fields
   const [formData, setFormData] = useState<TeacherProfileData>({
     full_name: '',
     headline: '',
@@ -34,30 +56,48 @@ export default function TeacherSettings() {
     youtube_intro_url: '',
   });
 
-  // State for immediate preview URL (either loaded from API or local blob)
+  // Subject management
+  const [allSubjects, setAllSubjects] = useState<Subject[]>([]);
+  const [teacherSubjectLinks, setTeacherSubjectLinks] = useState<TeacherSubjectLink[]>([]);
+  const [subjectSaving, setSubjectSaving] = useState<number | null>(null); // subject id being toggled
+
+  // Language management
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [newLang, setNewLang] = useState<Language>({ language: '', proficiency: 'Fluent' });
+
+  // Avatar
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  // Tracks whether an avatar upload is in progress
   const [avatarUploading, setAvatarUploading] = useState(false);
+
+  // Derived set of subject IDs the teacher already has + map to link ID
+  const teacherSubjectIds = new Set(teacherSubjectLinks.map(ts => ts.subject_id));
+  const subjectIdToLinkId = new Map(teacherSubjectLinks.map(ts => [ts.subject_id, ts.id]));
 
   // 1. Fetch Current Data
   useEffect(() => {
     let isMounted = true;
     const fetchData = async () => {
       try {
-        const { data } = await api.get('/api/me/');
-        if (isMounted) {
-          setFormData({
-            full_name: data.full_name || '',
-            headline: data.teacher_profile?.headline || '',
-            bio: data.teacher_profile?.bio || '',
-            youtube_intro_url: data.teacher_profile?.youtube_intro_url || '',
-          });
+        const [meRes, subjectsRes, teacherSubjectsRes] = await Promise.all([
+          api.get('/api/me/'),
+          api.get('/api/accounts/subjects/'),
+          api.get('/api/accounts/teacher-subjects/'),
+        ]);
 
-          // profile_picture_url is already an absolute URL from the API
-          if (data.profile_picture_url) {
-            setPreviewUrl(data.profile_picture_url);
-          }
-        }
+        if (!isMounted) return;
+
+        const data = meRes.data;
+        setFormData({
+          full_name: data.full_name || '',
+          headline: data.teacher_profile?.headline || '',
+          bio: data.teacher_profile?.bio || '',
+          youtube_intro_url: data.teacher_profile?.youtube_intro_url || '',
+        });
+        setLanguages(data.teacher_profile?.languages || []);
+        if (data.profile_picture_url) setPreviewUrl(data.profile_picture_url);
+
+        setAllSubjects(subjectsRes.data || []);
+        setTeacherSubjectLinks(teacherSubjectsRes.data || []);
       } catch (err) {
         console.error("Failed to load settings", err);
       } finally {
@@ -74,27 +114,18 @@ export default function TeacherSettings() {
     if (e.target.name === 'youtube_intro_url') setError('');
   };
 
-  // 3. Handle File Selection — upload immediately to the dedicated avatar endpoint
+  // 3. Avatar upload
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // Optimistic local preview
     setPreviewUrl(URL.createObjectURL(file));
     setError('');
     setAvatarUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('avatar', file);
-      // DO NOT set Content-Type manually — axios sets it automatically
-      // for FormData, including the required multipart boundary.
-      const res = await api.patch('/api/accounts/avatar/', formData);
-
-      // Replace blob URL with the permanent server URL
+      const fd = new FormData();
+      fd.append('avatar', file);
+      const res = await api.patch('/api/accounts/avatar/', fd);
       setPreviewUrl(res.data.profile_picture_url);
-
-      // Sync the global AuthContext so the new avatar persists across
-      // navigation and after page refresh.
       await refreshUser();
     } catch (err: unknown) {
       let msg = 'Upload failed. Please try again.';
@@ -103,40 +134,72 @@ export default function TeacherSettings() {
         if (apiErr.response?.data?.error) msg = apiErr.response.data.error;
       }
       setError(msg);
-      // Revert preview to last known good URL
       setPreviewUrl(null);
     } finally {
       setAvatarUploading(false);
-      // Reset file input so the same file can be re-selected if needed
       if (e.target) e.target.value = '';
     }
   };
 
-  // 4. Save Changes (Updated for Multipart/Form-Data)
+  // 4. Toggle subject (add / remove)
+  const handleSubjectToggle = useCallback(async (subject: Subject) => {
+    setSubjectSaving(subject.id);
+    try {
+      if (teacherSubjectIds.has(subject.id)) {
+        // Remove
+        const linkId = subjectIdToLinkId.get(subject.id)!;
+        await api.delete(`/api/accounts/teacher-subjects/${linkId}/`);
+        setTeacherSubjectLinks(prev => prev.filter(ts => ts.id !== linkId));
+      } else {
+        // Add
+        const res = await api.post('/api/accounts/teacher-subjects/', { subject_id: subject.id });
+        setTeacherSubjectLinks(prev => [...prev, res.data]);
+      }
+    } catch {
+      setError('Failed to update subject. Please try again.');
+    } finally {
+      setSubjectSaving(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teacherSubjectLinks]);
+
+  // 5. Language management
+  const addLanguage = () => {
+    if (!newLang.language.trim()) return;
+    if (languages.some(l => l.language.toLowerCase() === newLang.language.toLowerCase())) return;
+    setLanguages(prev => [...prev, { language: newLang.language.trim(), proficiency: newLang.proficiency }]);
+    setNewLang({ language: '', proficiency: 'Fluent' });
+  };
+
+  const removeLanguage = (index: number) => {
+    setLanguages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // 6. Save basic fields + languages
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setSuccess('');
     setError('');
 
-    // VALIDATION: Check YouTube URL format
-    if (formData.youtube_intro_url &&
+    if (
+      formData.youtube_intro_url &&
       !formData.youtube_intro_url.includes('youtube.com') &&
-      !formData.youtube_intro_url.includes('youtu.be')) {
+      !formData.youtube_intro_url.includes('youtu.be')
+    ) {
       setError('Please enter a valid YouTube link (e.g., https://youtu.be/...)');
       setLoading(false);
       return;
     }
 
     try {
-      // Send only text fields — avatar is uploaded separately via handleFileChange
       await api.patch('/api/me/', {
         full_name: formData.full_name,
         headline: formData.headline,
         bio: formData.bio,
         youtube_intro_url: formData.youtube_intro_url,
+        languages,
       });
-
       setSuccess('Profile updated successfully!');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
@@ -157,7 +220,7 @@ export default function TeacherSettings() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      {/* Header — same pattern as TeacherLessonHistory */}
+      {/* Header */}
       <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-4 flex items-center gap-4 sticky top-0 z-20">
         <button
           onClick={() => navigate('/dashboard')}
@@ -179,7 +242,8 @@ export default function TeacherSettings() {
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {/* Left: Profile preview card — rounded-2xl, same card style */}
+
+          {/* Left: Preview card */}
           <div className="md:col-span-1">
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 text-center sticky top-24">
               <div className="relative w-32 h-32 mx-auto mb-4">
@@ -206,6 +270,14 @@ export default function TeacherSettings() {
               </div>
               <div className="space-y-3 text-left">
                 <div className="flex items-center justify-between text-sm p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <span className="text-slate-500 font-medium flex items-center gap-2"><BookOpen size={16} /> Subjects</span>
+                  <span className="font-bold text-blue-600">{teacherSubjectLinks.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm p-3 bg-slate-50 rounded-xl border border-slate-100">
+                  <span className="text-slate-500 font-medium flex items-center gap-2"><Globe size={16} /> Languages</span>
+                  <span className="font-bold text-blue-600">{languages.length}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm p-3 bg-slate-50 rounded-xl border border-slate-100">
                   <span className="text-slate-500 font-medium flex items-center gap-2"><Youtube size={16} /> Intro Video</span>
                   <span className={`font-bold ${formData.youtube_intro_url ? 'text-green-600' : 'text-slate-400'}`}>
                     {formData.youtube_intro_url ? 'Linked' : 'Not set'}
@@ -218,8 +290,10 @@ export default function TeacherSettings() {
             </div>
           </div>
 
-          {/* Right: Edit form — rounded-2xl, same inputs as History */}
-          <div className="md:col-span-2">
+          {/* Right: Edit form */}
+          <div className="md:col-span-2 space-y-6">
+
+            {/* ── BASIC INFO FORM ── */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="border-b border-slate-100 px-6 py-4">
                 <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
@@ -318,6 +392,111 @@ export default function TeacherSettings() {
                 </form>
               </div>
             </div>
+
+            {/* ── SUBJECTS SECTION ── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="border-b border-slate-100 px-6 py-4">
+                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <BookOpen size={20} className="text-blue-600" /> Subjects You Teach
+                </h3>
+                <p className="text-slate-500 text-sm font-medium mt-0.5">Select the subjects you teach. Students can search by subject.</p>
+              </div>
+              <div className="p-6">
+                {allSubjects.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic">No subjects available. Ask an admin to add subjects.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {allSubjects.map(subject => {
+                      const isSelected = teacherSubjectIds.has(subject.id);
+                      const isSaving = subjectSaving === subject.id;
+                      return (
+                        <button
+                          key={subject.id}
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => handleSubjectToggle(subject)}
+                          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-semibold border transition-all ${isSelected
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600'
+                            } disabled:opacity-60`}
+                        >
+                          {isSaving ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : isSelected ? (
+                            <CheckCircle2 size={14} />
+                          ) : (
+                            <Plus size={14} />
+                          )}
+                          {subject.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── LANGUAGES SECTION ── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="border-b border-slate-100 px-6 py-4">
+                <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                  <Globe size={20} className="text-blue-600" /> Languages
+                </h3>
+                <p className="text-slate-500 text-sm font-medium mt-0.5">Languages you speak. Saved with the main form.</p>
+              </div>
+              <div className="p-6 space-y-4">
+                {/* Existing languages */}
+                {languages.length > 0 && (
+                  <div className="space-y-2">
+                    {languages.map((lang, i) => (
+                      <div key={i} className="flex items-center gap-3 bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+                        <Globe size={16} className="text-blue-500 shrink-0" />
+                        <span className="text-sm font-bold text-slate-800 flex-1">{lang.language}</span>
+                        <span className="text-xs font-semibold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
+                          {lang.proficiency}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeLanguage(i)}
+                          className="p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add new language */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newLang.language}
+                    onChange={e => setNewLang(n => ({ ...n, language: e.target.value }))}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addLanguage())}
+                    placeholder="Language (e.g. English)"
+                    className="flex-1 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <select
+                    value={newLang.proficiency}
+                    onChange={e => setNewLang(n => ({ ...n, proficiency: e.target.value }))}
+                    className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    {PROFICIENCY_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={addLanguage}
+                    disabled={!newLang.language.trim()}
+                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition-colors flex items-center gap-1.5"
+                  >
+                    <Plus size={16} /> Add
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400">Click <strong>Save Changes</strong> above to persist language changes.</p>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>

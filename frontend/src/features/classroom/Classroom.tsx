@@ -220,7 +220,10 @@ const getActivityIcon = (type: ActivityType) => {
 };
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function Classroom() {
+  usePageTitle('Live Classroom');
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();

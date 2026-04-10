@@ -111,6 +111,9 @@ class EmailCampaignService:
                     'to': [email_addr],
                     'subject': campaign.subject,
                     'html': html_body,
+                    # Tag every send with campaign_id so our webhook can route
+                    # open/click/unsubscribe events back to the correct campaign.
+                    'tags': [{'name': 'campaign_id', 'value': str(campaign.id)}],
                 }
                 # Personalise plain text if provided
                 if campaign.plain_text_body:

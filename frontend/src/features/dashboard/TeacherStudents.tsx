@@ -23,7 +23,10 @@ interface StudentStat {
   last_seen: string;
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherStudents() {
+  usePageTitle('My Students');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentStat[]>([]);

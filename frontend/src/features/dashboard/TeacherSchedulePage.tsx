@@ -54,7 +54,10 @@ interface FeedbackState {
   message: string;
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function TeacherSchedulePage() {
+  usePageTitle('My Schedule');
   const navigate = useNavigate();
   const [currentDate, setCurrentDate] = useState(new Date());
 

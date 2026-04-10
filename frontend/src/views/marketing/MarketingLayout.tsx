@@ -3,6 +3,7 @@ import { useAuth } from '../../features/auth/AuthContext'
 
 const NAV = [
   { label: 'Overview',      path: '/marketing',               icon: '📊' },
+  { label: 'Packages',      path: '/marketing/packages',      icon: '📦' },
   { label: 'Banners',       path: '/marketing/banners',       icon: '🖼️' },
   { label: 'Announcements', path: '/marketing/announcements', icon: '📢' },
   { label: 'Email',         path: '/marketing/email',         icon: '✉️' },

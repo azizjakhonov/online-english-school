@@ -17,7 +17,10 @@ interface Assignment {
   percentage: number; // 0-100 scale
 }
 
+import { usePageTitle } from '../../lib/usePageTitle';
+
 export default function StudentHomework() {
+  usePageTitle('Homework');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<Assignment[]>([]);

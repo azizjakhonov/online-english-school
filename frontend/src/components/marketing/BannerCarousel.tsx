@@ -13,18 +13,19 @@ interface Banner {
   cta_open_new_tab: boolean
   background_color: string
   text_color: string
+  banner_type: string
 }
 
 export function BannerCarousel({ audience }: { audience: 'student' | 'teacher' }) {
   const [index, setIndex] = useState(0)
 
   const { data: banners = [] } = useQuery<Banner[]>({
-    queryKey: ['marketing-active-banners', audience],
+    queryKey: ['marketing-active-banners', audience, 'carousel'],
     queryFn: () =>
       api
-        .get(`/api/marketing/banners/active/?audience=${audience}`)
+        .get(`/api/marketing/banners/active/?audience=${audience}&type=carousel`)
         .then(r => r.data),
-    staleTime: 5 * 60 * 1000, // cache 5 min
+    staleTime: 0,
   })
 
   // Track impression when current banner changes
@@ -32,7 +33,7 @@ export function BannerCarousel({ audience }: { audience: 'student' | 'teacher' }
     if (banners[index]) {
       api
         .post(`/api/marketing/banners/${banners[index].id}/track-impression/`)
-        .catch(() => {})
+        .catch(() => { })
     }
   }, [index, banners])
 
@@ -73,7 +74,7 @@ export function BannerCarousel({ audience }: { audience: 'student' | 'teacher' }
               onClick={() =>
                 api
                   .post(`/api/marketing/banners/${banner.id}/track-click/`)
-                  .catch(() => {})
+                  .catch(() => { })
               }
               className="inline-block mt-2 px-4 py-1.5 bg-white/20 hover:bg-white/30 rounded-md text-sm font-medium transition-colors"
             >
@@ -89,9 +90,8 @@ export function BannerCarousel({ audience }: { audience: 'student' | 'teacher' }
               <button
                 key={i}
                 onClick={() => setIndex(i)}
-                className={`w-1.5 rounded-full transition-all ${
-                  i === index ? 'h-5 bg-current' : 'h-1.5 bg-current opacity-40'
-                }`}
+                className={`w-1.5 rounded-full transition-all ${i === index ? 'h-5 bg-current' : 'h-1.5 bg-current opacity-40'
+                  }`}
               />
             ))}
           </div>

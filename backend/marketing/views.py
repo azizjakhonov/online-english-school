@@ -37,8 +37,20 @@ class BannerViewSet(viewsets.ModelViewSet):
     serializer_class = BannerSerializer
     permission_classes = [IsAuthenticated, IsMarketingUser]
 
+    def get_queryset(self):
+        archived = self.request.query_params.get('archived', 'false').lower() == 'true'
+        return Banner.objects.filter(is_archived=archived)
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        """Soft delete — sets is_archived=True, is_active=False instead of deleting."""
+        instance = self.get_object()
+        instance.is_archived = True
+        instance.is_active = False
+        instance.save(update_fields=['is_archived', 'is_active'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
@@ -51,8 +63,20 @@ class AnnouncementViewSet(viewsets.ModelViewSet):
     serializer_class = AnnouncementSerializer
     permission_classes = [IsAuthenticated, IsMarketingUser]
 
+    def get_queryset(self):
+        archived = self.request.query_params.get('archived', 'false').lower() == 'true'
+        return Announcement.objects.filter(is_archived=archived)
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        """Soft delete — sets is_archived=True, is_active=False instead of deleting."""
+        instance = self.get_object()
+        instance.is_archived = True
+        instance.is_active = False
+        instance.save(update_fields=['is_archived', 'is_active'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class EmailCampaignViewSet(viewsets.ModelViewSet):
@@ -168,15 +192,19 @@ class ActiveBannersView(APIView):
     def get(self, request):
         now = timezone.now()
         audience = request.query_params.get('audience', 'both')
+        banner_type = request.query_params.get('type')
         audience_q = Q(target_audience=audience) | Q(target_audience='both')
 
-        banners = Banner.objects.filter(
+        qs = Banner.objects.filter(
             audience_q,
             is_active=True,
         ).filter(
             Q(starts_at__isnull=True) | Q(starts_at__lte=now),
             Q(ends_at__isnull=True)   | Q(ends_at__gte=now),
-        ).order_by('order', '-created_at')
+        )
+        if banner_type:
+            qs = qs.filter(banner_type=banner_type)
+        banners = qs.order_by('order', '-created_at')
 
         serializer = BannerSerializer(banners, many=True, context={'request': request})
         return Response(serializer.data)
@@ -273,6 +301,136 @@ class ValidateDiscountCodeView(APIView):
             'discount_amount': discount_amount,
             'free_credits':    int(code.discount_value) if code.discount_type == 'free_credits' else 0,
         })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RESEND WEBHOOK: email engagement tracking
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ResendWebhookView(APIView):
+    """
+    POST /api/marketing/resend-webhook/
+
+    Receives Resend webhook events and increments EmailCampaign engagement
+    counters (opened_count, clicked_count, unsubscribed_count).
+
+    Secured via Svix signature verification (RESEND_WEBHOOK_SECRET setting).
+    If RESEND_WEBHOOK_SECRET is not configured, signature checking is skipped
+    (useful in development; do NOT deploy without a secret).
+
+    We deliberately skip `email.delivered` and `email.bounced` here because
+    those counts are already set synchronously in EmailCampaignService.send_campaign.
+    Only post-delivery engagement events are written through this webhook.
+
+    Event → field mapping
+    ─────────────────────
+    email.opened       → opened_count      + 1
+    email.clicked      → clicked_count     + 1
+    email.complained   → unsubscribed_count + 1
+    email.unsubscribed → unsubscribed_count + 1
+    """
+
+    permission_classes = [AllowAny]
+
+    # Events we care about → the model field to increment
+    _EVENT_FIELD_MAP = {
+        'email.opened':       'opened_count',
+        'email.clicked':      'clicked_count',
+        'email.complained':   'unsubscribed_count',
+        'email.unsubscribed': 'unsubscribed_count',
+    }
+
+    def post(self, request):
+        from django.conf import settings as django_settings
+
+        webhook_secret = getattr(django_settings, 'RESEND_WEBHOOK_SECRET', '')
+        if webhook_secret and not self._verify_svix_signature(request, webhook_secret):
+            return Response({'error': 'Invalid webhook signature.'}, status=401)
+
+        payload = request.data
+        event_type = payload.get('type', '')
+        data = payload.get('data', {})
+
+        # Campaign ID is embedded as a Resend tag named "campaign_id"
+        tags = {t['name']: t['value'] for t in data.get('tags', []) if isinstance(t, dict)}
+        campaign_id_str = tags.get('campaign_id')
+        if not campaign_id_str:
+            # Not one of our tracked emails — acknowledge silently
+            return Response(status=200)
+
+        try:
+            campaign_id = int(campaign_id_str)
+        except (ValueError, TypeError):
+            return Response(status=200)
+
+        field = self._EVENT_FIELD_MAP.get(event_type)
+        if field:
+            updated = EmailCampaign.objects.filter(id=campaign_id).update(
+                **{field: F(field) + 1}
+            )
+            if not updated:
+                # Campaign not found — still return 200 so Resend doesn't retry
+                pass
+
+        return Response(status=200)
+
+    @staticmethod
+    def _verify_svix_signature(request, webhook_secret: str) -> bool:
+        """
+        Verify the Svix webhook signature produced by Resend.
+
+        Algorithm (https://docs.svix.com/receiving/verifying-payloads/how):
+          msg_to_sign = f"{svix-id}.{svix-timestamp}.{raw_body}"
+          expected    = base64( hmac_sha256(base64_decode(secret_without_prefix), msg_to_sign) )
+          Compare expected against each "v1,<sig>" value in svix-signature header.
+        """
+        import base64
+        import hashlib
+        import hmac
+        import time
+
+        msg_id        = request.META.get('HTTP_SVIX_ID', '')
+        msg_timestamp = request.META.get('HTTP_SVIX_TIMESTAMP', '')
+        msg_signature = request.META.get('HTTP_SVIX_SIGNATURE', '')
+
+        if not (msg_id and msg_timestamp and msg_signature):
+            return False
+
+        # Replay-attack protection: reject events older than 5 minutes
+        try:
+            ts = int(msg_timestamp)
+            if abs(time.time() - ts) > 300:
+                return False
+        except (ValueError, TypeError):
+            return False
+
+        # Decode the Svix signing key (format: "whsec_<base64>")
+        secret_b64 = webhook_secret.removeprefix('whsec_')
+        try:
+            secret_bytes = base64.b64decode(secret_b64)
+        except Exception:
+            return False
+
+        # Build the signed payload
+        try:
+            raw_body = request.body.decode('utf-8', errors='replace')
+        except Exception:
+            return False
+        msg_to_sign = f"{msg_id}.{msg_timestamp}.{raw_body}".encode('utf-8')
+
+        expected_sig = base64.b64encode(
+            hmac.new(secret_bytes, msg_to_sign, hashlib.sha256).digest()
+        ).decode()
+
+        # svix-signature may contain multiple space-separated "v1,<sig>" tokens
+        for part in msg_signature.split(' '):
+            if ',' not in part:
+                continue
+            version, sig_b64 = part.split(',', 1)
+            if version == 'v1' and hmac.compare_digest(expected_sig, sig_b64):
+                return True
+
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -408,7 +566,7 @@ class KPIView(APIView):
 class RevenueView(APIView):
     """
     GET /api/marketing/metrics/revenue/?period=90
-    Daily revenue series + package breakdown.
+    Daily revenue series + per-package breakdown + per-provider breakdown.
     """
     permission_classes = [IsAuthenticated, IsMarketingUser]
 
@@ -417,10 +575,11 @@ class RevenueView(APIView):
         days = int(request.query_params.get('period', 90))
         start = now - timedelta(days=days)
 
+        succeeded_qs = Payment.objects.filter(status='succeeded', created_at__gte=start)
+
         # Daily revenue
         daily = (
-            Payment.objects
-            .filter(status='succeeded', created_at__gte=start)
+            succeeded_qs
             .annotate(date=TruncDate('created_at'))
             .values('date')
             .annotate(revenue=Sum('amount_uzs'), count=Count('id'))
@@ -432,14 +591,45 @@ class RevenueView(APIView):
         ]
 
         # Summary totals
-        total = (
-            Payment.objects
-            .filter(status='succeeded', created_at__gte=start)
-            .aggregate(total=Sum('amount_uzs'), count=Count('id'))
-        )
-        total_revenue = float(total['total'] or 0)
+        total = succeeded_qs.aggregate(total=Sum('amount_uzs'), count=Count('id'))
+        total_revenue  = float(total['total'] or 0)
         total_payments = total['count'] or 0
         avg_order = round(total_revenue / total_payments, 2) if total_payments else 0
+
+        # Per-package breakdown
+        by_package_qs = (
+            succeeded_qs
+            .filter(package__isnull=False)
+            .values('package__id', 'package__name', 'package__credits')
+            .annotate(sales=Count('id'), revenue=Sum('amount_uzs'))
+            .order_by('-revenue')
+        )
+        by_package = [
+            {
+                'package_id':   row['package__id'],
+                'package_name': row['package__name'],
+                'credits':      row['package__credits'],
+                'sales':        row['sales'],
+                'revenue':      float(row['revenue']),
+            }
+            for row in by_package_qs
+        ]
+
+        # Per-provider breakdown
+        by_provider_qs = (
+            succeeded_qs
+            .values('provider')
+            .annotate(sales=Count('id'), revenue=Sum('amount_uzs'))
+            .order_by('-revenue')
+        )
+        by_provider = [
+            {
+                'provider': row['provider'],
+                'sales':    row['sales'],
+                'revenue':  float(row['revenue']),
+            }
+            for row in by_provider_qs
+        ]
 
         return Response({
             'period_days':    days,
@@ -448,6 +638,8 @@ class RevenueView(APIView):
             'avg_order_value': avg_order,
             'currency':       'UZS',
             'daily_revenue':  daily_revenue,
+            'by_package':     by_package,
+            'by_provider':    by_provider,
         })
 
 
@@ -468,27 +660,33 @@ class FunnelView(APIView):
         days = int(request.query_params.get('period', 30))
         start = timezone.now() - timedelta(days=days)
 
-        signups = User.objects.filter(date_joined__gte=start).count()
+        # Cohort = users who signed up within the selected period.
+        # All subsequent funnel steps are filtered to this same cohort so the
+        # funnel can only decrease (no step can exceed the one above it).
+        cohort_ids = list(
+            User.objects.filter(date_joined__gte=start).values_list('id', flat=True)
+        )
+        signups = len(cohort_ids)
 
         profiles_completed = StudentProfile.objects.filter(
-            user__date_joined__gte=start
+            user_id__in=cohort_ids
         ).count()
 
         first_lesson_booked = (
             Lesson.objects
-            .filter(created_at__gte=start)
+            .filter(student_id__in=cohort_ids)
             .values('student').distinct().count()
         )
 
         first_lesson_completed = (
             Lesson.objects
-            .filter(status='COMPLETED', start_time__gte=start)
+            .filter(status='COMPLETED', student_id__in=cohort_ids)
             .values('student').distinct().count()
         )
 
         first_payment = (
             Payment.objects
-            .filter(status='succeeded', created_at__gte=start)
+            .filter(status='succeeded', student_id__in=cohort_ids)
             .values('student').distinct().count()
         )
 

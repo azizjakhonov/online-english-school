@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, ChevronRight, Check, AlertCircle, Volume2, Play, Pause } from 'lucide-react-native';
 import { Audio } from 'expo-av';
-import * as SecureStore from 'expo-secure-store';
+import storage from '../../lib/storage';
 import { Colors, Shadows } from '../../theme';
 import client, { BRIDGE_BASE_URL } from '../../api/client';
 
@@ -402,7 +402,7 @@ const ListeningView = ({ activity, onAnswer, disabled }: any) => {
             return;
         }
 
-        const token = await SecureStore.getItemAsync('access_token');
+        const token = await storage.getItemAsync('access_token');
         const fullUrl = audio_download_url.startsWith('http')
             ? audio_download_url
             : `${BRIDGE_BASE_URL}${audio_download_url.startsWith('/') ? '' : '/'}${audio_download_url}${audio_download_url.includes('?') ? '&' : '?'}token=${token}`;
